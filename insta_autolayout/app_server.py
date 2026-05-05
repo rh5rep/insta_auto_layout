@@ -415,7 +415,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
           <li><strong>Archive directory:</strong> optional OneDrive archive destination for completed batches.</li>
           <li><strong>Shared state directory:</strong> the OneDrive root that will contain <code>review_state</code>.</li>
           <li><strong>Config path:</strong> optional JSON config. If set, it supplies generation defaults.</li>
-          <li><strong>Latest batch directory:</strong> the batch opened by <em>Open Latest Review</em>.</li>
+          <li><strong>Review batch directory:</strong> any exported batch folder you want to open in the review UI, including older batches.</li>
         </ul>
         <p>Use <strong>Warm Cache</strong> before a larger run, then <strong>Generate Batch</strong>. Both jobs now run in the background and stream logs below.</p>
       </div>
@@ -485,11 +485,12 @@ def _render_app_shell(settings: dict[str, str]) -> str:
             <button type="button" class="secondary" data-reveal="config_path">Open</button>
           </div>
           <div class="path-field">
-            <label>Latest batch directory<input type="text" name="latest_batch_dir" autocomplete="off"></label>
+            <label>Review batch directory<input type="text" name="latest_batch_dir" autocomplete="off"></label>
             <button type="button" class="secondary" data-choose="latest_batch_dir" data-kind="directory">Choose</button>
             <button type="button" class="secondary" data-reveal="latest_batch_dir">Open</button>
           </div>
         </div>
+        <p class="muted">Set this to any exported batch folder when you want to review an older batch instead of the last one generated from this screen.</p>
       </section>
       <section>
         <h2>Generation Controls</h2>
@@ -533,7 +534,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
           <button type="submit">Save Settings</button>
           <button type="button" class="secondary" data-action="/api/warm-cache">Warm Cache</button>
           <button type="button" class="secondary" data-action="/api/generate-batch">Generate Batch</button>
-          <a class="button secondary {latest_disabled}" href="{latest_href}">Open Latest Review</a>
+          <a id="open-latest-review" class="button secondary {latest_disabled}" href="{latest_href}">Open Selected Review</a>
         </div>
         <div class="status-row">
           <span id="job-state">Ready.</span>
@@ -554,6 +555,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
     const statusBox = document.querySelector("#status");
     const jobState = document.querySelector("#job-state");
     const jobIdNode = document.querySelector("#job-id");
+    const openLatestReviewLink = document.querySelector("#open-latest-review");
     let pollTimer = null;
 
     function setStatus(payload) {{
@@ -582,6 +584,13 @@ def _render_app_shell(settings: dict[str, str]) -> str:
       startupChecks.innerHTML = `<ul class="diag-list">${{rows.join("")}}</ul>`;
     }}
 
+    function updateLatestReviewLink(pathValue) {{
+      const hasPath = Boolean(String(pathValue || "").trim());
+      openLatestReviewLink.classList.toggle("disabled", !hasPath);
+      openLatestReviewLink.href = hasPath ? "/review/latest/" : "#";
+      openLatestReviewLink.setAttribute("aria-disabled", hasPath ? "false" : "true");
+    }}
+
     function readForm() {{
       const data = Object.fromEntries(new FormData(form).entries());
       for (const key of ["preset_id", "input_dir", "output_dir", "archive_dir", "shared_state_dir", "cache_dir", "music_dir", "music_manifest", "config_path", "latest_batch_dir", "count", "duration_min", "duration_max", "style", "scan_depth", "punchiness", "min_bpm", "diversity_strength", "audio_variants", "seed"]) {{
@@ -604,6 +613,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
       if (settings.project_id) localStorage.setItem("insta_autolayout.project_id", settings.project_id);
       if (settings.preset_id && selectedPreset()) applyPreset(selectedPreset());
       updatePresetDescription();
+      updateLatestReviewLink(settings.latest_batch_dir || "");
     }}
 
     function renderPresets() {{
@@ -672,6 +682,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
         body: JSON.stringify(settings)
       }});
       const payload = await response.json();
+      writeForm(payload);
       await refreshStartupChecks();
       return payload;
     }}
@@ -745,6 +756,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
       }} else {{
         if (job.latest_batch_dir) {{
           form.elements.latest_batch_dir.value = job.latest_batch_dir;
+          updateLatestReviewLink(job.latest_batch_dir);
           await saveSettings();
         }}
       }}
