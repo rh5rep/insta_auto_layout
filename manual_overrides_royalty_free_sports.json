@@ -1,0 +1,33 @@
+{
+  "exclude_files": [
+    "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video/Downloaded Royalty Free/mixkit-a-young-woman-rock-climbing-on-an-indoor-rock-wall-50929-hd-ready.mp4",
+    "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video/Downloaded Royalty Free/mixkit-man-filling-his-hands-with-chalk-to-do-mountaineering-41043-hd-ready.mp4",
+    "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video/Downloaded Royalty Free/mixkit-people-climbing-on-a-mountaineering-wall-41024-hd-ready.mp4",
+    "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video/Downloaded Royalty Free/mixkit-two-people-talking-before-mountaineering-41042-hd-ready.mp4",
+    "mixkit-a-couple-of-young-girls-savour-a-the-the-licious-51238-hd-ready.mp4",
+    "mixkit-brothers-playing-with-a-board-game-in-a-dining-room-5336-hd-ready.mp4",
+    "mixkit-detailed-shot-of-a-board-in-a-game-of-catan-5334-hd-ready.mp4",
+    "mixkit-friends-playing-catan-sitting-at-a-table-5333-hd-ready.mp4",
+    "mixkit-friends-playing-monopoly-5235-hd-ready.mp4",
+    "mixkit-hands-of-a-person-playing-a-game-of-uno-5326-hd-ready.mp4",
+    "mixkit-tearing-down-a-jenga-tower-in-a-fun-match-5322-hd-ready.mp4",
+    "mixkit-young-people-at-a-table-playing-jenga-5323-hd-ready.mp4",
+    "mixkit-young-people-playing-a-board-game-with-cards-5340-hd-ready.mp4",
+    "mixkit-young-woman-playing-risk-5342-hd-ready.mp4",
+    "mixkit-friends-laughing-on-a-bus-42583-hd-ready.mp4",
+    "mixkit-group-of-friends-hanging-out-in-a-garden-42746-hd-ready.mp4",
+    "mixkit-group-of-friends-partying-happily-4640-hd-ready.mp4"
+  ],
+  "prefer_files": [
+    "mixkit-a-game-of-one-on-one-basketball-between-two-players-44467-hd-ready.mp4",
+    "mixkit-bike-ride-of-a-couple-through-a-city-park-41875-hd-ready.mp4",
+    "mixkit-couple-of-cyclists-riding-through-nature-together-44341-hd-ready.mp4",
+    "mixkit-soccer-team-cheering-together-43477-hd-ready.mp4",
+    "mixkit-hands-of-a-soccer-team-making-a-cheer-43479-hd-ready.mp4",
+    "mixkit-experienced-mountain-climber-climbing-a-rock-43322-hd-ready.mp4",
+    "mixkit-two-mountaineers-celebrating-at-the-top-34578-hd-ready.mp4"
+  ],
+  "avoid_files": [
+    "mixkit-couple-having-coffee-in-a-campsite-43165-hd-ready.mp4"
+  ]
+}

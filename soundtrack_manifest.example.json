@@ -1,0 +1,26 @@
+{
+  "tracks": [
+    {
+      "id": "night-drive-128",
+      "title": "Night Drive 128",
+      "path": "./music_cache/night_drive_128.mp3",
+      "source": "approved_local_cache",
+      "license": "Replace with your actual license note",
+      "credit": "Replace with artist credit if required",
+      "bpm": 128,
+      "energy": 0.94,
+      "tags": ["fast_punchy", "nightlife", "energy", "lifestyle", "promo"]
+    },
+    {
+      "id": "clean-upbeat-120",
+      "title": "Clean Upbeat 120",
+      "path": "./music_cache/clean_upbeat_120.mp3",
+      "source": "approved_local_cache",
+      "license": "Replace with your actual license note",
+      "credit": "Replace with artist credit if required",
+      "bpm": 120,
+      "energy": 0.76,
+      "tags": ["clean", "uplift", "social", "promo"]
+    }
+  ]
+}

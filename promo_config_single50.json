@@ -1,0 +1,19 @@
+{
+  "input": "/Users/rami/Movies/insta_autolayout/down-there/down-there-album",
+  "output": "/Users/rami/Movies/insta_autolayout/down-there/down-there-single50",
+  "archive_output": "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video Gen",
+  "count": 50,
+  "style": "fast_punchy",
+  "duration_min": 12,
+  "duration_max": 16,
+  "scan_depth": "quick",
+  "punchiness": "hyper",
+  "min_bpm": 145,
+  "audio_variants": [
+    "auto"
+  ],
+  "music_dir": "/Users/rami/Documents/insta_autolayout/music_cache",
+  "music_manifest": "/Users/rami/Documents/insta_autolayout/soundtrack_manifest.json",
+  "seed": "down-there-single50",
+  "diversity_strength": 2.6
+}

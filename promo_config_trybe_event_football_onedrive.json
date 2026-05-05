@@ -1,0 +1,43 @@
+{
+  "input": "/Users/rami/Documents/insta_autolayout/scratch/asset_views/trybe_event_football",
+  "output": "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video Gen/trybe-branded-event-pickup-football",
+  "cache_dir": "/Users/rami/Documents/insta_autolayout/scratch/trybe-invite-cache",
+  "style": "clean_product_demo",
+  "duration_min": 14,
+  "duration_max": 18,
+  "scan_depth": "quick",
+  "punchiness": "normal",
+  "min_bpm": 120,
+  "audio_variants": ["auto"],
+  "music_dir": "/Users/rami/Documents/insta_autolayout/music_cache",
+  "music_manifest": "/Users/rami/Documents/insta_autolayout/soundtrack_manifest.json",
+  "count": 2,
+  "seed": "trybe-event-pickup-football-v1",
+  "diversity_strength": 2.0,
+  "text_overlays": {
+    "label": "Event invite",
+    "headline": "Pickup football",
+    "subheadline": "Bring boots. Meet the crew.",
+    "cta": "Join the next Trybe event",
+    "placement": "bottom"
+  },
+  "brand_cards": {
+    "logo_path": "/Users/rami/Documents/Trybe/client/dist/assets/trybe-logo-full-web-BeAoY2OM.png",
+    "intro_duration": 1.1,
+    "outro_duration": 1.4,
+    "footer": "Try something new. Meet people for real.",
+    "intro": {
+      "eyebrow": "EVENT INVITE",
+      "headline": "Pickup football",
+      "subheadline": "A match is easier to join than a group chat.",
+      "proof": "bring boots. meet the crew.",
+      "cta": "Join the next Trybe event"
+    },
+    "outro": {
+      "eyebrow": "TRYBE",
+      "headline": "Find people who actually show up.",
+      "subheadline": "Sports, hobbies and social plans in one place.",
+      "cta": "Join Trybe"
+    }
+  }
+}

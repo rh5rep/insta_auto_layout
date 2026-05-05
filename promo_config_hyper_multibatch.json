@@ -1,0 +1,40 @@
+{
+  "input": "/Users/rami/Movies/insta_autolayout/down-there/down-there-album",
+  "output": "/Users/rami/Movies/insta_autolayout/down-there/down-there-hyper-multibatch",
+  "archive_output": "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video Gen",
+  "style": "fast_punchy",
+  "duration_min": 12,
+  "duration_max": 16,
+  "scan_depth": "quick",
+  "punchiness": "hyper",
+  "min_bpm": 145,
+  "audio_variants": ["auto"],
+  "music_dir": "/Users/rami/Documents/insta_autolayout/music_cache",
+  "music_manifest": "/Users/rami/Documents/insta_autolayout/soundtrack_manifest.json",
+  "batches": [
+    {
+      "name": "batch_01_balanced",
+      "count": 10,
+      "seed": "down-there-hyper-batch-01",
+      "diversity_strength": 1.0
+    },
+    {
+      "name": "batch_02_stronger_diversity",
+      "count": 10,
+      "seed": "down-there-hyper-batch-02",
+      "diversity_strength": 1.45
+    },
+    {
+      "name": "batch_03_explore_more",
+      "count": 10,
+      "seed": "down-there-hyper-batch-03",
+      "diversity_strength": 1.9
+    },
+    {
+      "name": "batch_04_max_variety",
+      "count": 10,
+      "seed": "down-there-hyper-batch-04",
+      "diversity_strength": 2.4
+    }
+  ]
+}

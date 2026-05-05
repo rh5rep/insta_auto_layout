@@ -1,0 +1,43 @@
+{
+  "input": "/Users/rami/Documents/insta_autolayout/scratch/asset_views/trybe_generic_sports",
+  "output": "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video Gen/trybe-branded-generic-find-people-sports",
+  "cache_dir": "/Users/rami/Documents/insta_autolayout/scratch/trybe-invite-cache",
+  "style": "clean_product_demo",
+  "duration_min": 15,
+  "duration_max": 19,
+  "scan_depth": "quick",
+  "punchiness": "normal",
+  "min_bpm": 120,
+  "audio_variants": ["auto"],
+  "music_dir": "/Users/rami/Documents/insta_autolayout/music_cache",
+  "music_manifest": "/Users/rami/Documents/insta_autolayout/soundtrack_manifest.json",
+  "count": 3,
+  "seed": "trybe-generic-find-people-sports-v1",
+  "diversity_strength": 2.2,
+  "text_overlays": {
+    "label": "Trybe",
+    "headline": "Find people to do stuff with",
+    "subheadline": "Climb, play, hike, move",
+    "cta": "Join Trybe",
+    "placement": "bottom"
+  },
+  "brand_cards": {
+    "logo_path": "/Users/rami/Documents/Trybe/client/dist/assets/trybe-logo-full-web-BeAoY2OM.png",
+    "intro_duration": 1.2,
+    "outro_duration": 1.5,
+    "footer": "Try something new. Meet people for real.",
+    "intro": {
+      "eyebrow": "TRYBE",
+      "headline": "Your next plan should not be another scroll",
+      "subheadline": "Real activities. Real people. Low-pressure plans.",
+      "proof": "show up. click. belong.",
+      "cta": "Find your people"
+    },
+    "outro": {
+      "eyebrow": "TRYBE",
+      "headline": "Find people through the things you already want to try",
+      "subheadline": "Climbing, football, hikes, board games and more.",
+      "cta": "Join Trybe"
+    }
+  }
+}

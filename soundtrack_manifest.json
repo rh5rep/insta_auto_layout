@@ -1,0 +1,76 @@
+{
+  "tracks": [
+    {
+      "id": "addictive-stomp-dimmysad-405257",
+      "title": "This Beat Is Addictive",
+      "path": "./music_cache/addictive_stomp_dimmysad_150.mp3",
+      "source": "Pixabay",
+      "license": "Pixabay Content License",
+      "credit": "dimmysad",
+      "bpm": 150,
+      "energy": 1.0,
+      "tags": ["fast_punchy", "hyper", "addictive", "stomp", "drums", "sport", "claps", "energy", "promo", "social", "reels"],
+      "page_url": "https://pixabay.com/music/beats-this-beat-is-addictive-energetic-stomp-drums-sport-claps-405257/"
+    },
+    {
+      "id": "sports-soccer-prettyjohn1-499975",
+      "title": "Sports Football Soccer Music",
+      "path": "./music_cache/sports_soccer_prettyjohn1_150.mp3",
+      "source": "Pixabay",
+      "license": "Pixabay Content License",
+      "credit": "prettyjohn1",
+      "bpm": 150,
+      "energy": 0.96,
+      "tags": ["fast_punchy", "hyper", "sports", "football", "soccer", "action", "energy", "promo", "social", "reels"],
+      "page_url": "https://pixabay.com/music/upbeat-sports-football-soccer-music-499975/"
+    },
+    {
+      "id": "reels-trending-xxxdolm-456128",
+      "title": "Trending Instagram Reels TikTok Music",
+      "path": "./music_cache/reels_trending_xxxdolm_128.mp3",
+      "source": "Pixabay",
+      "license": "Pixabay Content License",
+      "credit": "XXXDOLM",
+      "bpm": 128,
+      "energy": 0.98,
+      "tags": ["fast_punchy", "reels", "tiktok", "trending", "electronic", "energy", "lifestyle", "promo", "social"],
+      "page_url": "https://pixabay.com/music/electronic-trending-instagram-reels-tiktok-music-456128/"
+    },
+    {
+      "id": "upbeat-corporate-motivation-yourtunes-315990",
+      "title": "Upbeat Corporate Motivation",
+      "path": "./music_cache/upbeat_corporate_motivation_yourtunes_120.mp3",
+      "source": "Pixabay",
+      "license": "Pixabay Content License",
+      "credit": "yourtunes",
+      "bpm": 120,
+      "energy": 0.76,
+      "tags": ["clean", "uplift", "corporate", "business", "commercial", "motivational", "social", "promo"],
+      "page_url": "https://pixabay.com/music/upbeat-upbeat-corporate-motivation-315990/"
+    },
+    {
+      "id": "corporate-upbeat-delosound-342066",
+      "title": "Corporate Upbeat",
+      "path": "./music_cache/corporate_upbeat_delosound_132.mp3",
+      "source": "Pixabay",
+      "license": "Pixabay Content License",
+      "credit": "Delosound",
+      "bpm": 132,
+      "energy": 0.9,
+      "tags": ["fast_punchy", "upbeat", "corporate", "dynamic", "energetic", "bright", "clean", "promo"],
+      "page_url": "https://pixabay.com/music/upbeat-corporate-upbeat-342066/"
+    },
+    {
+      "id": "uplifting-motivational-playstarz-440390",
+      "title": "Corporate Upbeat Uplifting Motivational",
+      "path": "./music_cache/uplifting_motivational_playstarz_124.mp3",
+      "source": "Pixabay",
+      "license": "Pixabay Content License",
+      "credit": "PlayStarz Music",
+      "bpm": 124,
+      "energy": 0.84,
+      "tags": ["uplift", "motivational", "corporate", "business", "clean", "promo", "success"],
+      "page_url": "https://pixabay.com/music/upbeat-corporate-upbeat-uplifting-motivational-440390/"
+    }
+  ]
+}

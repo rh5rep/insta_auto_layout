@@ -1,0 +1,18 @@
+{
+  "input": "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video/Downloaded Royalty Free",
+  "output": "/Users/rami/Documents/insta_autolayout/scratch/trybe-royalty-free-sports-curated",
+  "cache_dir": "/Users/rami/Documents/insta_autolayout/scratch/trybe-royalty-free-cache",
+  "style": "fast_punchy",
+  "duration_min": 12,
+  "duration_max": 16,
+  "scan_depth": "quick",
+  "punchiness": "fast",
+  "min_bpm": 140,
+  "audio_variants": ["auto"],
+  "music_dir": "/Users/rami/Documents/insta_autolayout/music_cache",
+  "music_manifest": "/Users/rami/Documents/insta_autolayout/soundtrack_manifest.json",
+  "manual_overrides": "/Users/rami/Documents/insta_autolayout/manual_overrides_royalty_free_sports.json",
+  "count": 8,
+  "seed": "trybe-royalty-free-sports-curated",
+  "diversity_strength": 2.4
+}
