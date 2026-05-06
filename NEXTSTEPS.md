@@ -33,7 +33,8 @@ See `docs/local_first_review_system.md` for the living product and technical dir
 
 - Add local SQLite index for fast search and dashboards
 - Feed richer review summaries into candidate scoring, trim selection, planner strategy weights, and diversity tuning
+- Add optional review coverage / watch-depth metadata later if we start using external reviewers or need stronger confidence signals
 - Do we want to do this with audio/text scripts
 - Max will have 2 cut-up videos
 - I will try and get v0 of review platform
-- Figure out simple storage/file transfer through programatic interfaces because of onedrive organizational issues 
+- Figure out simple storage/file transfer through programatic interfaces because of onedrive organizational issues

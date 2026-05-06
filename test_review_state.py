@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from insta_autolayout.overrides import load_manual_overrides
 from insta_autolayout.review_models import ReviewEvent
 from insta_autolayout.shared_state import SharedReviewState
 
@@ -63,6 +64,54 @@ class SharedReviewStateTest(unittest.TestCase):
                 }
             )
             self.assertTrue((review_state / "events" / "batch_02" / "rami.jsonl").exists())
+
+    def test_merges_generated_feedback_with_manual_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            album = root / "album"
+            album.mkdir(parents=True, exist_ok=True)
+            shared_root = root / "shared"
+            derived_path = shared_root / "review_state" / "derived" / "manual-overrides.generated.json"
+            derived_path.parent.mkdir(parents=True, exist_ok=True)
+            derived_path.write_text(
+                json.dumps(
+                    {
+                        "prefer_files": ["clips/generated_good.mov"],
+                        "avoid_files": ["clips/conflict.mov", "clips/generated_bad.mov"],
+                        "clip_ratings": {
+                            "clips/generated_bad.mov@4.2-5.1": -1,
+                            "clips/conflict.mov@1.0-2.0": -2,
+                        },
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            manual_path = album / "manual-overrides.json"
+            manual_path.write_text(
+                json.dumps(
+                    {
+                        "prefer_files": ["clips/conflict.mov"],
+                        "clip_ratings": {"clips/conflict.mov@1.0-2.0": 2},
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            overrides = load_manual_overrides(album, None, shared_state_dir=shared_root)
+            self.assertEqual(overrides["derived_path"], str(derived_path))
+            self.assertEqual(overrides["manual_path"], str(manual_path.resolve()))
+            self.assertEqual(overrides["prefer_files"], {"clips/generated_good.mov", "clips/conflict.mov"})
+            self.assertEqual(overrides["avoid_files"], {"clips/generated_bad.mov"})
+            self.assertEqual(
+                overrides["clip_ratings"],
+                {
+                    "clips/generated_bad.mov@4.2-5.1": -1.0,
+                    "clips/conflict.mov@1.0-2.0": 2.0,
+                },
+            )
+            self.assertTrue(overrides["using_generated_feedback"])
 
 
 if __name__ == "__main__":

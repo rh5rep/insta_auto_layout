@@ -130,6 +130,9 @@ Important:
 
 - Do not have both reviewers write to the same reviewer id.
 - The JSONL sharing model is collaboration-safe because each reviewer appends only to their own file.
+- When `Shared state directory` is set in the app, the next generated batch automatically uses `review_state/derived/manual-overrides.generated.json` if that file exists.
+- For concrete examples of review events, derived outputs, and how they affect future generation, see [docs/review_data_examples.md](/Users/rami/Documents/insta_autolayout/docs/review_data_examples.md).
+- For the explicit scoring/interpretation contract between review data and generator behavior, see [docs/review_scoring_contract.md](/Users/rami/Documents/insta_autolayout/docs/review_scoring_contract.md).
 
 ## Max Setup
 

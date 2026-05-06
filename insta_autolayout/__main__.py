@@ -30,6 +30,9 @@ from .run_config import config_value, load_run_config
 from .scanner import MediaScanner
 
 
+PROGRESS_PREFIX = "__PROGRESS__ "
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate short 9:16 promo-video batches from a local media library.")
     parser.add_argument("--config", default=None, help="JSON config file for repeatable batch settings")
@@ -89,6 +92,7 @@ def main() -> None:
     output_arg = config_value(args.output, config.output)
     archive_output_arg = config_value(args.archive_output, config.archive_output)
     cache_dir_arg = config_value(args.cache_dir, config.cache_dir)
+    shared_state_arg = config_value(args.shared_state, getattr(config, "shared_state", None))
     if not input_arg or not output_arg:
         raise SystemExit("--input and --output are required unless supplied by --config")
 
@@ -112,14 +116,17 @@ def main() -> None:
     output_dir = Path(output_arg).expanduser().resolve()
     archive_output_dir = Path(archive_output_arg).expanduser().resolve() if archive_output_arg else None
     cache_dir = Path(cache_dir_arg).expanduser().resolve() if cache_dir_arg else default_cache_dir(input_dir)
+    shared_state_dir = Path(shared_state_arg).expanduser().resolve() if shared_state_arg else None
     if not input_dir.exists():
         raise SystemExit(f"Input folder does not exist: {input_dir}")
 
-    overrides = load_manual_overrides(input_dir, manual_overrides)
+    _emit_progress("setup", "Preparing overrides", current=0, total=1, percent=2)
+    overrides = load_manual_overrides(input_dir, manual_overrides, shared_state_dir=shared_state_dir)
     input_signature = compute_input_signature(input_dir)
     outcome = load_scan_outcome(cache_dir, input_signature)
     scan_cache_hit = outcome is not None
     if outcome is None:
+        _emit_progress("scan", "Scanning media library", current=0, total=1, percent=8)
         scanner = MediaScanner()
         outcome = scanner.scan(input_dir)
         save_scan_outcome(cache_dir, input_signature, outcome)
@@ -135,19 +142,26 @@ def main() -> None:
     candidates = load_candidates(cache_dir, asset_state_signature, style, scan_depth)
     candidate_cache_hit = candidates is not None
     if candidates is None:
+        _emit_progress("candidates", "Building candidates", current=0, total=1, percent=20)
         candidates = PromoCandidateBuilder(scan_depth=scan_depth).build(filtered_assets, style)
         save_candidates(cache_dir, asset_state_signature, style, scan_depth, candidates)
     write_manifest(cache_dir, input_dir, input_signature, asset_state_signature, style, scan_depth)
     candidates = apply_candidate_feedback(candidates, overrides)
     if not candidates:
         raise SystemExit("No usable promo candidates were produced from the input media.")
+    if overrides.get("derived_path"):
+        print(f"learned feedback: {overrides['derived_path']}")
+    if overrides.get("manual_path"):
+        print(f"manual overrides: {overrides['manual_path']}")
     print(f"cache: {cache_dir}")
     print(f"  scan: {'hit' if scan_cache_hit else 'warmed'}")
     print(f"  candidates[{style}/{scan_depth}]: {'hit' if candidate_cache_hit else 'warmed'}")
     if args.warm_cache_only:
+        _emit_progress("completed", "Cache warm complete", current=1, total=1, percent=100)
         print("cache warm complete; exiting before planning/export.")
         return
 
+    _emit_progress("audio", "Preparing soundtrack selection", current=0, total=1, percent=30)
     soundtrack_library = SoundtrackLibrary.from_sources(
         search_dirs=_resolve_music_dirs(input_dir, music_dir),
         manifest_path=Path(music_manifest).expanduser().resolve() if music_manifest else _default_music_manifest(input_dir),
@@ -183,6 +197,7 @@ def main() -> None:
             punchiness=str(spec["punchiness"]),
             min_bpm=int(spec["min_bpm"]),
         )
+        _emit_progress("planning", f"Planning concepts for batch {batch_index}/{len(batch_specs)}", current=0, total=1, percent=40)
         concepts = PromoPlanner().build_concepts(
             candidates=candidates,
             count=max(1, min(int(spec["count"]), 200)),
@@ -205,10 +220,21 @@ def main() -> None:
             )
             outputs.append(PromoOutput(concept=concept, variants=variants, report=report))
 
-        PromoExporter(audio_planner=audio_planner).export_batch(outputs, filtered_assets, batch_output_dir, dry_run=args.dry_run)
+        _emit_progress("rendering", f"Rendering {len(outputs)} concepts", current=0, total=max(len(outputs), 1), percent=45)
+        PromoExporter(audio_planner=audio_planner).export_batch(
+            outputs,
+            filtered_assets,
+            batch_output_dir,
+            dry_run=args.dry_run,
+            progress_callback=_export_progress_emitter(len(outputs)),
+        )
+        _emit_progress("finalizing", "Writing review assets", current=0, total=1, percent=96)
         review_context = {
             "input_dir": str(input_dir),
             "manual_overrides_path": str(overrides.get("path")) if overrides.get("path") else None,
+            "manual_overrides_paths": list(overrides.get("paths", [])),
+            "derived_overrides_path": str(overrides.get("derived_path")) if overrides.get("derived_path") else None,
+            "using_generated_feedback": bool(overrides.get("using_generated_feedback")),
         }
         (batch_output_dir / "review_context.json").write_text(json.dumps(review_context, indent=2), encoding="utf-8")
         if spec.get("archive_output"):
@@ -220,6 +246,7 @@ def main() -> None:
         _print_summary(outputs, outcome.exclusions + ranking_exclusions + audio_notes)
         if args.explain:
             _print_explain(outputs)
+    _emit_progress("completed", "Batch generation complete", current=1, total=1, percent=100)
 
 
 def _print_summary(outputs, exclusions) -> None:
@@ -253,6 +280,37 @@ def _print_explain(outputs) -> None:
         for variant in output.variants:
             extra = f" track={variant.track_title}" if variant.track_title else ""
             print(f"    - {variant.render_name}: bpm={variant.bpm} audio={variant.has_audio}{extra}")
+
+
+def _emit_progress(stage: str, label: str, *, current: int | None = None, total: int | None = None, percent: int | None = None) -> None:
+    payload: dict[str, Any] = {"stage": stage, "label": label}
+    if current is not None:
+        payload["current"] = current
+    if total is not None:
+        payload["total"] = total
+    if percent is not None:
+        payload["percent"] = percent
+    print(PROGRESS_PREFIX + json.dumps(payload, sort_keys=True), flush=True)
+
+
+def _export_progress_emitter(total_outputs: int):
+    safe_total = max(total_outputs, 1)
+
+    def callback(payload: dict[str, Any]) -> None:
+        current = int(payload.get("current") or 0)
+        total = int(payload.get("total") or safe_total)
+        base = 45
+        span = 50
+        percent = base + round((min(max(current, 0), total) / max(total, 1)) * span)
+        _emit_progress(
+            str(payload.get("stage") or "rendering"),
+            str(payload.get("label") or "Rendering concepts"),
+            current=current,
+            total=total,
+            percent=min(percent, 95),
+        )
+
+    return callback
 
 def _parse_audio_variants(raw: str) -> list[str]:
     allowed = {"silent", "auto", "generated"}

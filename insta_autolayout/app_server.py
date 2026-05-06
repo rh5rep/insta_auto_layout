@@ -365,6 +365,31 @@ def _render_app_shell(settings: dict[str, str]) -> str:
       font-size: 13px;
       font-weight: 650;
     }}
+    .progress-shell {{
+      display: grid;
+      gap: 8px;
+    }}
+    .progress-track {{
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      background: #e5e7eb;
+      overflow: hidden;
+    }}
+    .progress-fill {{
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #1f6feb, #22c55e);
+      transition: width .2s ease;
+    }}
+    .progress-meta {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: #475569;
+      font-size: 13px;
+      font-weight: 650;
+    }}
     .muted {{
       color: #64748b;
       font-size: 13px;
@@ -381,6 +406,12 @@ def _render_app_shell(settings: dict[str, str]) -> str:
       color: #166534;
       font-size: 13px;
       font-weight: 650;
+    }}
+    .diag-info {{
+      color: #1d4ed8;
+      font-size: 13px;
+      font-weight: 650;
+      line-height: 1.5;
     }}
     .diag-error {{
       color: #b91c1c;
@@ -440,6 +471,10 @@ def _render_app_shell(settings: dict[str, str]) -> str:
       <section>
         <h2>Startup Checks</h2>
         <div id="startup-checks"></div>
+      </section>
+      <section>
+        <h2>Learned Feedback</h2>
+        <div id="learned-feedback-status"></div>
       </section>
       <section>
         <h2>Paths</h2>
@@ -540,6 +575,13 @@ def _render_app_shell(settings: dict[str, str]) -> str:
           <span id="job-state">Ready.</span>
           <span id="job-id"></span>
         </div>
+        <div class="progress-shell">
+          <div class="progress-track"><div id="job-progress-fill" class="progress-fill"></div></div>
+          <div class="progress-meta">
+            <span id="job-progress-label">Waiting to start.</span>
+            <span id="job-progress-value">0%</span>
+          </div>
+        </div>
         <pre id="status">No job running.</pre>
       </section>
     </form>
@@ -552,10 +594,14 @@ def _render_app_shell(settings: dict[str, str]) -> str:
     const presetSelect = document.querySelector("#preset-select");
     const presetDescription = document.querySelector("#preset-description");
     const startupChecks = document.querySelector("#startup-checks");
+    const learnedFeedbackStatus = document.querySelector("#learned-feedback-status");
     const statusBox = document.querySelector("#status");
     const jobState = document.querySelector("#job-state");
     const jobIdNode = document.querySelector("#job-id");
     const openLatestReviewLink = document.querySelector("#open-latest-review");
+    const jobProgressFill = document.querySelector("#job-progress-fill");
+    const jobProgressLabel = document.querySelector("#job-progress-label");
+    const jobProgressValue = document.querySelector("#job-progress-value");
     let pollTimer = null;
 
     function setStatus(payload) {{
@@ -565,6 +611,18 @@ def _render_app_shell(settings: dict[str, str]) -> str:
     function setJobState(text, jobId) {{
       jobState.textContent = text;
       jobIdNode.textContent = jobId ? `Job ${{jobId}}` : "";
+    }}
+
+    function renderJobProgress(progress, status) {{
+      const percent = Number(progress?.percent || (status === "completed" ? 100 : 0));
+      const label = progress?.label || (status === "completed" ? "Completed." : status === "failed" ? "Failed." : "Waiting to start.");
+      const current = progress?.current;
+      const total = progress?.total;
+      jobProgressFill.style.width = `${{Math.max(0, Math.min(percent, 100))}}%`;
+      jobProgressValue.textContent = `${{Math.max(0, Math.min(percent, 100))}}%`;
+      jobProgressLabel.textContent = Number.isFinite(Number(current)) && Number.isFinite(Number(total)) && Number(total) > 0
+        ? `${{label}} (${{current}}/${{total}})`
+        : label;
     }}
 
     function renderStartupChecks(payload) {{
@@ -582,6 +640,19 @@ def _render_app_shell(settings: dict[str, str]) -> str:
         rows.push(`<li class="diag-warning"><strong>Warning:</strong> ${{warning}}</li>`);
       }}
       startupChecks.innerHTML = `<ul class="diag-list">${{rows.join("")}}</ul>`;
+    }}
+
+    function renderLearnedFeedbackStatus(payload) {{
+      const generatedPath = payload.generated_feedback_path || "";
+      if (payload.using_generated_feedback && generatedPath) {{
+        learnedFeedbackStatus.innerHTML = `<p class="diag-info">Next generation will use learned feedback from:<br><code>${{generatedPath}}</code></p>`;
+        return;
+      }}
+      if (generatedPath) {{
+        learnedFeedbackStatus.innerHTML = `<p class="muted">Shared state is configured, but no generated feedback file exists yet.<br><code>${{generatedPath}}</code></p>`;
+        return;
+      }}
+      learnedFeedbackStatus.innerHTML = '<p class="muted">Set `Shared state directory` to enable automatic learned feedback on future generations.</p>';
     }}
 
     function updateLatestReviewLink(pathValue) {{
@@ -689,7 +760,9 @@ def _render_app_shell(settings: dict[str, str]) -> str:
 
     async function refreshStartupChecks() {{
       const response = await fetch("/api/startup-check");
-      renderStartupChecks(await response.json());
+      const payload = await response.json();
+      renderStartupChecks(payload);
+      renderLearnedFeedbackStatus(payload);
     }}
 
     for (const button of document.querySelectorAll("[data-action]")) {{
@@ -750,6 +823,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
       const response = await fetch(`/api/jobs/${{encodeURIComponent(jobId)}}`);
       const job = await response.json();
       setJobState(job.status || "unknown", jobId);
+      renderJobProgress(job.progress || null, job.status || "");
       setStatus((job.logs || []).join("\\n") || JSON.stringify(job, null, 2));
       if (job.status === "running" || job.status === "queued") {{
         pollTimer = setTimeout(() => pollJob(jobId), 1000);
@@ -765,6 +839,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
     renderPresets();
     writeForm(initialSettings);
     renderStartupChecks(initialStartupCheck);
+    renderLearnedFeedbackStatus(initialStartupCheck);
   </script>
 </body>
 </html>
@@ -870,6 +945,8 @@ def _stringify_variants(value: object) -> str:
 def _startup_check(settings: dict[str, str]) -> dict[str, object]:
     issues: list[str] = []
     warnings: list[str] = []
+    generated_feedback_path = ""
+    using_generated_feedback = False
 
     if not shutil.which("ffmpeg"):
         warnings.append("`ffmpeg` is not on PATH. Rendering may still work through bundled helpers on some machines, but install ffmpeg for predictable setup.")
@@ -891,8 +968,12 @@ def _startup_check(settings: dict[str, str]) -> dict[str, object]:
     shared_state_dir = settings.get("shared_state_dir", "").strip()
     if shared_state_dir:
         shared_path = Path(shared_state_dir).expanduser()
+        generated_feedback_file = _generated_feedback_path(shared_path)
+        generated_feedback_path = str(generated_feedback_file)
         if not shared_path.exists():
             warnings.append("Shared state directory does not exist yet. The app can create `review_state`, but make sure this path is really the synced OneDrive folder on this machine.")
+        else:
+            using_generated_feedback = generated_feedback_file.exists()
     else:
         warnings.append("Shared state directory is empty. Review events will not save until it is set.")
 
@@ -926,6 +1007,8 @@ def _startup_check(settings: dict[str, str]) -> dict[str, object]:
         "issues": issues,
         "warnings": warnings,
         "platform": sys.platform,
+        "generated_feedback_path": generated_feedback_path,
+        "using_generated_feedback": using_generated_feedback,
     }
 
 
@@ -935,6 +1018,11 @@ def _existing_path(value: str) -> Path | None:
         return None
     path = Path(raw).expanduser()
     return path if path.exists() else None
+
+
+def _generated_feedback_path(shared_state_root: Path) -> Path:
+    review_state_dir = shared_state_root if shared_state_root.name == "review_state" else shared_state_root / "review_state"
+    return review_state_dir / "derived" / "manual-overrides.generated.json"
 
 
 def _start_generation_job(warm_cache_only: bool) -> dict:
@@ -949,6 +1037,7 @@ def _start_generation_job(warm_cache_only: bool) -> dict:
         "returncode": None,
         "started_at": None,
         "completed_at": None,
+        "progress": {"stage": "queued", "label": "Queued", "percent": 0},
     }
     with _JOBS_LOCK:
         _JOBS[job_id] = job
@@ -968,7 +1057,13 @@ def _job_snapshot(job_id: str) -> dict:
 def _run_generation_job(job_id: str, warm_cache_only: bool) -> None:
     settings = load_local_settings()
     command = _generation_command(settings, warm_cache_only)
-    _update_job(job_id, status="running", started_at=_now(), logs=[f"[{_now()}] running: {_command_text(command)}"])
+    _update_job(
+        job_id,
+        status="running",
+        started_at=_now(),
+        progress={"stage": "running", "label": "Starting job", "percent": 1},
+        logs=[f"[{_now()}] running: {_command_text(command)}"],
+    )
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     except OSError as exc:
@@ -977,7 +1072,9 @@ def _run_generation_job(job_id: str, warm_cache_only: bool) -> None:
 
     assert process.stdout is not None
     for line in process.stdout:
-        _append_job_log(job_id, line.rstrip())
+        stripped = line.rstrip()
+        if not _maybe_update_job_progress(job_id, stripped):
+            _append_job_log(job_id, stripped)
     returncode = process.wait()
     completed_at = _now()
     latest_batch_dir = None
@@ -995,6 +1092,7 @@ def _run_generation_job(job_id: str, warm_cache_only: bool) -> None:
         completed_at=completed_at,
         returncode=returncode,
         latest_batch_dir=latest_batch_dir,
+        progress={"stage": status, "label": "Completed" if status == "completed" else "Failed", "percent": 100 if status == "completed" else 0},
         logs=extra,
     )
 
@@ -1008,6 +1106,7 @@ def _generation_command(settings: dict[str, str], warm_cache_only: bool) -> list
         ("input_dir", "--input"),
         ("output_dir", "--output"),
         ("archive_dir", "--archive-output"),
+        ("shared_state_dir", "--shared-state"),
         ("cache_dir", "--cache-dir"),
         ("count", "--count"),
         ("duration_min", "--duration-min"),
@@ -1060,6 +1159,7 @@ def _public_job(job: dict) -> dict:
         "started_at": job.get("started_at"),
         "completed_at": job.get("completed_at"),
         "latest_batch_dir": job.get("latest_batch_dir"),
+        "progress": dict(job.get("progress", {})),
     }
 
 
@@ -1075,6 +1175,29 @@ def _tail(value: str, limit: int = 12000) -> str:
     if len(value) <= limit:
         return value
     return value[-limit:]
+
+
+def _maybe_update_job_progress(job_id: str, line: str) -> bool:
+    prefix = "__PROGRESS__ "
+    if not line.startswith(prefix):
+        return False
+    try:
+        payload = json.loads(line[len(prefix) :])
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    progress = {
+        "stage": str(payload.get("stage") or ""),
+        "label": str(payload.get("label") or ""),
+        "percent": int(payload.get("percent") or 0),
+    }
+    if payload.get("current") is not None:
+        progress["current"] = int(payload["current"])
+    if payload.get("total") is not None:
+        progress["total"] = int(payload["total"])
+    _update_job(job_id, progress=progress)
+    return True
 
 
 def _choose_path(payload: dict) -> dict:

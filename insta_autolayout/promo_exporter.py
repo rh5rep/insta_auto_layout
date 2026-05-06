@@ -4,7 +4,7 @@ import json
 import math
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from xml.sax.saxutils import escape
 
 import numpy as np
@@ -22,13 +22,30 @@ class PromoExporter:
     def __init__(self, audio_planner: PromoAudioPlanner | None = None) -> None:
         self.audio_planner = audio_planner or PromoAudioPlanner()
 
-    def export_batch(self, outputs: list[PromoOutput], assets: list[MediaAsset], output_dir: Path, dry_run: bool = False) -> None:
+    def export_batch(
+        self,
+        outputs: list[PromoOutput],
+        assets: list[MediaAsset],
+        output_dir: Path,
+        dry_run: bool = False,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
         assets_by_path = {asset.source_path: asset for asset in assets}
         overlap_report = _batch_overlap_report(outputs)
         overlap_by_id = {record["concept_id"]: record for record in overlap_report["concepts"]}
         manifest = []
-        for output in outputs:
+        total_outputs = max(len(outputs), 1)
+        for index, output in enumerate(outputs, start=1):
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "stage": "rendering",
+                        "label": f"Rendering {output.concept.concept_id}",
+                        "current": index - 1,
+                        "total": total_outputs,
+                    }
+                )
             concept_overlap = overlap_by_id.get(output.concept.concept_id, {})
             output.report["timeline_note"] = (
                 "Top-level timeline is the selected clip plan before audio/BPM retiming. "
@@ -97,6 +114,15 @@ class PromoExporter:
                     "variants": variant_records,
                 }
             )
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "stage": "rendering",
+                        "label": f"Rendered {output.concept.concept_id}",
+                        "current": index,
+                        "total": total_outputs,
+                    }
+                )
 
         (output_dir / "overlap_report.json").write_text(json.dumps(overlap_report, indent=2), encoding="utf-8")
         (output_dir / "batch_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
