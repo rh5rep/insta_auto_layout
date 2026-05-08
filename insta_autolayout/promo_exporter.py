@@ -1388,7 +1388,7 @@ def _review_html_v2() -> str:
     const statusOptions = ["unreviewed", "shortlist", "approved", "needs_edit", "reject"];
     const targetHelp = {
       concept: "Use this when your feedback is about the whole video: pacing, story, hook, music fit, or whether it is post-worthy.",
-      source_file: "Use this when the original media file itself should be preferred, avoided, or marked as overused/off-brand.",
+      source_file: "Use this when the current item itself should be preferred, avoided, or marked as overused/off-brand.",
       clip: "Use this when the exact current trim is good or bad, or its start/end/crop needs adjustment.",
       brand_card: "Use this when the intro or outro card itself needs work."
     };
@@ -1446,6 +1446,19 @@ def _review_html_v2() -> str:
       return response.json();
     }
 
+    async function postReviewClear(payload) {
+      const response = await fetch("/api/review/clear", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || `/api/review/clear returned ${response.status}`);
+      }
+      return data;
+    }
+
     function fallbackAction(payload) {
       if (payload.target.type === "source_file") {
         return payload.status === "reject" ? "avoid_source" : "prefer_source";
@@ -1464,7 +1477,7 @@ def _review_html_v2() -> str:
       return values.map((value) => `
         <label class="choice">
           <input type="radio" name="${name}" value="${value}" ${value === current ? "checked" : ""}>
-          ${esc(labels[value] || value.replaceAll("_", " "))}
+          <span class="choice-label" data-choice-label="${name}:${value}">${esc(labels[value] || value.replaceAll("_", " "))}</span>
         </label>
       `).join("");
     }
@@ -1603,31 +1616,38 @@ def _review_html_v2() -> str:
             <section class="panel">
               <h2>What are you reviewing?</h2>
               <p id="target-help" class="target-help"></p>
-              <div class="target-grid">${renderRadios("target_type", ["concept", "source_file", "clip"], "concept", {concept: "whole video", source_file: "current source", clip: "current clip"})}</div>
-            </section>
-            <section class="panel">
-              <h2>Status</h2>
-              <div class="status-grid">${renderRadios("status", statusOptions, "unreviewed")}</div>
+              <div class="target-grid">${renderRadios("target_type", ["source_file", "clip", "concept"], "source_file", {concept: "whole video", source_file: "current item", clip: "current clip"})}</div>
             </section>
             <section class="panel">
               <h2>Rating</h2>
               <div class="rating-grid">${renderRadios("rating", ["-2", "-1", "0", "1", "2"], "0")}</div>
             </section>
             <section class="panel">
-              <h2>Reason Tags</h2>
-              <div id="reason-tags" class="tags"></div>
-            </section>
-            <section class="panel">
-              <h2>Note</h2>
-              <textarea id="note" placeholder="Optional note for this concept, source, or exact trim"></textarea>
-              <div class="quick" style="margin-top: 10px">
-                <button type="button" data-quick="approved">Approve</button>
-                <button type="button" data-quick="shortlist">Shortlist</button>
-                <button type="button" data-quick="needs_edit">Needs edit</button>
-                <button type="button" data-quick="reject">Reject</button>
-              </div>
+              <details id="detailed-feedback">
+                <summary>Detailed feedback (optional)</summary>
+                <div style="margin-top: 12px">
+                  <h2>Status</h2>
+                  <div class="status-grid">${renderRadios("status", statusOptions, "unreviewed")}</div>
+                </div>
+                <div style="margin-top: 12px">
+                  <h2>Reason Tags</h2>
+                  <div id="reason-tags" class="tags"></div>
+                </div>
+                <div style="margin-top: 12px">
+                  <h2>Note</h2>
+                  <textarea id="note" placeholder="Optional note for this concept, source, or exact trim"></textarea>
+                </div>
+                <div class="quick" style="margin-top: 10px">
+                  <button type="button" data-quick="approved">Approve</button>
+                  <button type="button" data-quick="shortlist">Shortlist</button>
+                  <button type="button" data-quick="needs_edit">Needs edit</button>
+                  <button type="button" data-quick="reject">Reject</button>
+                </div>
+              </details>
               <div style="margin-top: 10px">
                 <button id="save" class="primary" type="button">Save Feedback</button>
+                <button id="clear-form" type="button">Reset Form</button>
+                <button id="clear-batch-feedback" type="button">Clear My Batch Feedback</button>
               </div>
               <p id="save-status" class="status-line"></p>
             </section>
@@ -1640,6 +1660,15 @@ def _review_html_v2() -> str:
       const saveStatus = document.getElementById("save-status");
       const reasonTagNode = document.getElementById("reason-tags");
       const targetHelpNode = document.getElementById("target-help");
+      const noteNode = document.getElementById("note");
+      const detailedNode = document.getElementById("detailed-feedback");
+      let autosaveTimer = null;
+      let saveInFlight = false;
+      let pendingAutosave = false;
+      let activeTargetKey = null;
+      let suppressFormEvents = false;
+      const draftStates = new Map();
+      const savedSignatures = new Map();
 
       function selectedTargetType() {
         return document.querySelector('input[name="target_type"]:checked').value;
@@ -1653,25 +1682,182 @@ def _review_html_v2() -> str:
 
       function updateTargetControls() {
         let targetType = selectedTargetType();
-        if (currentClip?.review_type === "brand_card" && targetType !== "concept") {
-          targetType = "concept";
-          document.querySelector('input[name="target_type"][value="concept"]').checked = true;
-        }
         const sourceInput = document.querySelector('input[name="target_type"][value="source_file"]');
         const clipInput = document.querySelector('input[name="target_type"][value="clip"]');
+        const sourceLabel = document.querySelector('[data-choice-label="target_type:source_file"]');
         const sourceUnavailable = !currentClip?.source_file;
         const clipUnavailable = !currentClip?.source_file || currentClip?.review_type === "brand_card";
-        sourceInput.disabled = sourceUnavailable;
+        if (sourceLabel) {
+          sourceLabel.textContent = currentClip?.review_type === "brand_card" ? "current brand card" : "current source";
+        }
+        sourceInput.disabled = false;
         clipInput.disabled = clipUnavailable;
-        sourceInput.closest(".choice").classList.toggle("disabled", sourceUnavailable);
+        sourceInput.closest(".choice").classList.toggle("disabled", false);
         clipInput.closest(".choice").classList.toggle("disabled", clipUnavailable);
-        targetHelpNode.textContent = currentClip?.review_type === "brand_card" && targetType === "concept"
-          ? "You are currently on a brand card. Use whole-video feedback for now, or note the intro/outro card issue."
-          : targetHelp[targetType] || "";
-        reasonTagNode.innerHTML = renderTags(currentClip?.review_type === "brand_card" && targetType === "concept" ? "brand_card" : targetType);
+        if (currentClip?.review_type === "brand_card") {
+          clipInput.disabled = true;
+          clipInput.closest(".choice").classList.add("disabled");
+          if (targetType === "clip") {
+            targetType = "source_file";
+          }
+        }
+        if (targetType === "brand_card") {
+          targetType = "source_file";
+          sourceInput.checked = true;
+        }
+        const effectiveTargetType = currentClip?.review_type === "brand_card" && targetType === "source_file" ? "brand_card" : targetType;
+        targetHelpNode.textContent = targetHelp[effectiveTargetType] || "";
+        reasonTagNode.innerHTML = renderTags(effectiveTargetType);
+      }
+
+      function currentFormState() {
+        return {
+          targetType: selectedTargetType(),
+          status: document.querySelector('input[name="status"]:checked').value,
+          rating: Number(document.querySelector('input[name="rating"]:checked').value),
+          tags: [...document.querySelectorAll('input[name="reason_tags"]:checked')].map((input) => input.value),
+          note: noteNode.value || "",
+          detailsOpen: detailedNode?.open || false
+        };
+      }
+
+      function defaultFormState() {
+        return { targetType: selectedTargetType(), status: "unreviewed", rating: 0, tags: [], note: "", detailsOpen: false };
+      }
+
+      function targetKeyForCurrentSelection() {
+        const target = targetPayload(selectedTargetType(), currentClip);
+        if (target.type === "concept") return `concept:${conceptId}`;
+        if (target.type === "brand_card") return `brand_card:${conceptId}:${target.role || "brand_card"}`;
+        if (target.type === "source_file") return `source_file:${conceptId}:${target.source_file || "unknown"}`;
+        return `clip:${conceptId}:${target.clip_token || "unknown"}`;
+      }
+
+      function applyFormState(formState) {
+        suppressFormEvents = true;
+        try {
+          const statusValue = String(formState?.status || "unreviewed");
+          const ratingValue = String(Number(formState?.rating ?? 0));
+          const tags = new Set(formState?.tags || []);
+          const statusInput = document.querySelector(`input[name="status"][value="${statusValue}"]`);
+          const ratingInput = document.querySelector(`input[name="rating"][value="${ratingValue}"]`);
+          (statusInput || document.querySelector('input[name="status"][value="unreviewed"]')).checked = true;
+          (ratingInput || document.querySelector('input[name="rating"][value="0"]')).checked = true;
+          document.querySelectorAll('input[name="reason_tags"]').forEach((input) => {
+            input.checked = tags.has(input.value);
+          });
+          noteNode.value = formState?.note || "";
+          if (detailedNode) detailedNode.open = Boolean(formState?.detailsOpen);
+        } finally {
+          suppressFormEvents = false;
+        }
+      }
+
+      function storeActiveDraft() {
+        if (!activeTargetKey) return;
+        draftStates.set(activeTargetKey, currentFormState());
+      }
+
+      function loadDraftForCurrentTarget() {
+        activeTargetKey = targetKeyForCurrentSelection();
+        const draft = draftStates.get(activeTargetKey) || defaultFormState();
+        applyFormState(draft);
+        if (!isMeaningfulState(draft)) {
+          saveStatus.textContent = savedSignatures.has(activeTargetKey)
+            ? "Saved feedback exists for this item."
+            : "No saved feedback for this item yet.";
+        }
+      }
+
+      function isMeaningfulState(formState) {
+        return (
+          formState.rating !== 0 ||
+          formState.tags.length > 0 ||
+          formState.note.trim() !== ""
+        );
+      }
+
+      function inferredStatusFromRating(rating) {
+        if (rating >= 1) return "approved";
+        if (rating <= -2) return "reject";
+        if (rating < 0) return "needs_edit";
+        return "unreviewed";
+      }
+
+      function buildPayload() {
+        const formState = currentFormState();
+        const effectiveStatus = formState.status !== "unreviewed"
+          ? formState.status
+          : inferredStatusFromRating(formState.rating);
+        return {
+          reviewer_id: reviewerId,
+          project_id: projectId,
+          batch_id: null,
+          concept_id: conceptId,
+          variant_id: variant.audio_mode || variant.display_name || null,
+          target: targetPayload(formState.targetType, currentClip),
+          status: effectiveStatus,
+          rating: formState.rating,
+          reason_tags: formState.detailsOpen ? formState.tags : [],
+          note: formState.detailsOpen ? (formState.note || null) : null,
+          generation_context: generationContext(currentClip, report)
+        };
+      }
+
+      async function performSave({ force = false } = {}) {
+        if (autosaveTimer) {
+          clearTimeout(autosaveTimer);
+          autosaveTimer = null;
+        }
+        const formState = currentFormState();
+        const targetKey = targetKeyForCurrentSelection();
+        storeActiveDraft();
+        if (!force && !isMeaningfulState(formState)) {
+          saveStatus.textContent = savedSignatures.has(targetKey)
+            ? "Saved feedback exists for this item."
+            : "No saved feedback for this item yet.";
+          return;
+        }
+        const payload = buildPayload();
+        const signature = JSON.stringify(payload);
+        if (!force && signature === savedSignatures.get(targetKey)) {
+          saveStatus.textContent = "Saved.";
+          return;
+        }
+        if (saveInFlight) {
+          pendingAutosave = true;
+          return;
+        }
+        saveInFlight = true;
+        saveStatus.textContent = force ? "Saving..." : "Autosaving...";
+        try {
+          const result = await postStructured(payload);
+          savedSignatures.set(targetKey, signature);
+          saveStatus.textContent = result.ok
+            ? `Saved. Events: ${result.summary?.structured_event_count || result.summary?.event_count || "ok"}`
+            : "Save failed";
+        } catch (error) {
+          saveStatus.textContent = `Save failed: ${error}`;
+        } finally {
+          saveInFlight = false;
+          if (pendingAutosave) {
+            pendingAutosave = false;
+            requestAutoSave(80);
+          }
+        }
+      }
+
+      function requestAutoSave(delay = 250) {
+        if (autosaveTimer) clearTimeout(autosaveTimer);
+        autosaveTimer = setTimeout(() => {
+          performSave({ force: false }).catch((error) => {
+            saveStatus.textContent = `Save failed: ${error}`;
+          });
+        }, delay);
       }
 
       function setCurrent(item) {
+        storeActiveDraft();
         currentClip = item || currentClip;
         segments.forEach((segment) => segment.classList.toggle("active", Number(segment.dataset.index) === timeline.indexOf(currentClip)));
         document.getElementById("current-source").textContent = currentClip?.label || fileName(currentClip?.source_file);
@@ -1679,12 +1865,12 @@ def _review_html_v2() -> str:
         document.getElementById("current-trim").textContent = currentClip?.source_file ? timeRange(currentClip.source_start, currentClip.source_end) : (currentClip?.card_role || "n/a");
         document.getElementById("current-score").textContent = currentClip?.source_file ? `${Number(currentClip.score_total || 0).toFixed(2)} / ${currentClip.crop_strategy || "crop"}` : "brand card";
         updateTargetControls();
+        loadDraftForCurrentTarget();
       }
       window.selectSegment = (index) => {
         const item = timeline[Number(index)];
         if (!item) return;
         player.currentTime = Number(item.timeline_start || 0);
-        player.play().catch(() => {});
         setCurrent(item);
       };
 
@@ -1698,36 +1884,89 @@ def _review_html_v2() -> str:
       document.querySelectorAll("[data-quick]").forEach((button) => {
         button.addEventListener("click", () => {
           document.querySelector(`input[name="status"][value="${button.dataset.quick}"]`).checked = true;
+          if (!suppressFormEvents) storeActiveDraft();
+          requestAutoSave(120);
         });
       });
       document.querySelectorAll('input[name="target_type"]').forEach((input) => {
-        input.addEventListener("change", () => updateTargetControls());
+        input.addEventListener("change", () => {
+          storeActiveDraft();
+          updateTargetControls();
+          loadDraftForCurrentTarget();
+        });
+      });
+      document.querySelectorAll('input[name="status"]').forEach((input) => {
+        input.addEventListener("change", () => {
+          if (suppressFormEvents) return;
+          storeActiveDraft();
+          requestAutoSave(120);
+        });
+      });
+      document.querySelectorAll('input[name="rating"]').forEach((input) => {
+        input.addEventListener("change", () => {
+          if (suppressFormEvents) return;
+          storeActiveDraft();
+          requestAutoSave(120);
+        });
+      });
+      reasonTagNode.addEventListener("change", () => {
+        if (suppressFormEvents) return;
+        storeActiveDraft();
+        requestAutoSave(150);
+      });
+      noteNode.addEventListener("input", () => {
+        if (suppressFormEvents) return;
+        storeActiveDraft();
+        requestAutoSave(700);
+      });
+      noteNode.addEventListener("blur", () => {
+        if (suppressFormEvents) return;
+        storeActiveDraft();
+        performSave({ force: false }).catch((error) => {
+          saveStatus.textContent = `Save failed: ${error}`;
+        });
+      });
+      detailedNode?.addEventListener("toggle", () => {
+        if (suppressFormEvents) return;
+        storeActiveDraft();
+        if (!detailedNode.open) {
+          requestAutoSave(120);
+        }
       });
 
       document.getElementById("save").addEventListener("click", async () => {
-        const targetType = selectedTargetType();
-        const status = document.querySelector('input[name="status"]:checked').value;
-        const rating = Number(document.querySelector('input[name="rating"]:checked').value);
-        const tags = [...document.querySelectorAll('input[name="reason_tags"]:checked')].map((input) => input.value);
-        const payload = {
-          reviewer_id: reviewerId,
-          project_id: projectId,
-          batch_id: null,
-          concept_id: conceptId,
-          variant_id: variant.audio_mode || variant.display_name || null,
-          target: targetPayload(targetType, currentClip),
-          status,
-          rating,
-          reason_tags: tags,
-          note: document.getElementById("note").value || null,
-          generation_context: generationContext(currentClip, report)
-        };
-        saveStatus.textContent = "Saving...";
+        await performSave({ force: true });
+      });
+
+      document.getElementById("clear-form").addEventListener("click", () => {
+        document.querySelector('input[name="status"][value="unreviewed"]').checked = true;
+        document.querySelector('input[name="rating"][value="0"]').checked = true;
+        document.querySelectorAll('input[name="reason_tags"]:checked').forEach((input) => { input.checked = false; });
+        noteNode.value = "";
+        draftStates.set(activeTargetKey, defaultFormState());
+        updateTargetControls();
+        loadDraftForCurrentTarget();
+        if (autosaveTimer) {
+          clearTimeout(autosaveTimer);
+          autosaveTimer = null;
+        }
+        saveStatus.textContent = "Form reset. No saved events were deleted.";
+      });
+
+      document.getElementById("clear-batch-feedback").addEventListener("click", async () => {
+        if (!window.confirm(`Delete all saved review events for reviewer ${reviewerId} in this batch?`)) return;
+        saveStatus.textContent = "Clearing saved feedback...";
         try {
-          const result = await postStructured(payload);
-          saveStatus.textContent = result.ok ? `Saved. Events: ${result.summary?.structured_event_count || result.summary?.event_count || "ok"}` : "Save failed";
+          const result = await postReviewClear({
+            reviewer_id: reviewerId,
+            project_id: projectId
+          });
+          savedSignatures.clear();
+          draftStates.clear();
+          loadDraftForCurrentTarget();
+          saveStatus.textContent = `Cleared feedback. Remaining batch events: ${result.summary?.event_count ?? 0}`;
         } catch (error) {
-          saveStatus.textContent = `Save failed: ${error}`;
+          saveStatus.textContent = `Clear failed: ${error}`;
         }
       });
 

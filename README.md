@@ -108,11 +108,17 @@ If `--manual-overrides` is omitted, the tool automatically looks for `manual-ove
 To share review state between machines:
 
 - Each person runs the app locally on their own machine.
-- Each person points `Shared state directory` at their own synced copy of the same OneDrive folder.
+- Each person uses the same Supabase-backed project state.
+- `Shared state directory` is now optional and acts as a local mirror/archive if you still want file exports under `review_state/`.
 - Rami should use reviewer id `rami`.
 - Max should use reviewer id `max`.
 
-The app writes canonical shared review events as:
+The shared review source of truth is now Supabase:
+
+- `review_events` stores structured feedback events
+- `derived_feedback` stores the latest generated source/clip overrides per project
+
+If `Shared state directory` is set, the app also mirrors local files as:
 
 ```text
 review_state/events/<batch_id>/rami.jsonl
@@ -129,10 +135,12 @@ review_state/derived/manual-overrides.generated.json
 Important:
 
 - Do not have both reviewers write to the same reviewer id.
-- The JSONL sharing model is collaboration-safe because each reviewer appends only to their own file.
-- When `Shared state directory` is set in the app, the next generated batch automatically uses `review_state/derived/manual-overrides.generated.json` if that file exists.
+- Shared review learning now works even if both machines cannot mount the same OneDrive path.
+- When Supabase is configured, the next generated batch automatically uses `supabase://derived_feedback/<project_id>` if learned feedback exists.
+- When `Shared state directory` is also set, the app keeps file mirrors under `review_state/` for debug/archive use.
 - For concrete examples of review events, derived outputs, and how they affect future generation, see [docs/review_data_examples.md](/Users/rami/Documents/insta_autolayout/docs/review_data_examples.md).
 - For the explicit scoring/interpretation contract between review data and generator behavior, see [docs/review_scoring_contract.md](/Users/rami/Documents/insta_autolayout/docs/review_scoring_contract.md).
+- Create the Supabase tables from [supabase/review_state_schema.sql](/Users/rami/Documents/insta_autolayout/supabase/review_state_schema.sql) before relying on the shared backend.
 
 ## Max Setup
 
@@ -140,13 +148,13 @@ For a first-time setup on Max's machine:
 
 1. Clone the repo and install the Python dependencies.
 2. Install `ffmpeg` and make sure it is on the system path.
-3. Make sure OneDrive is syncing the shared Trybe folder locally on Max's machine.
+3. Create a local `.env` with the shared Supabase credentials and optional R2 credentials.
 4. Start the app with [Start Insta Autolayout.bat](/Users/rami/Documents/insta_autolayout/Start%20Insta%20Autolayout.bat) on Windows or `python -m insta_autolayout --app` on Linux.
 5. In the app, set `Reviewer` to `Max`.
-6. Point `Shared state directory` at Max's local synced copy of the shared OneDrive root.
+6. Set paths for input/output/cache/music on Max's machine. `Shared state directory` is optional unless Max wants a local file mirror too.
 7. Confirm the `Startup Checks` section shows no blocking errors before generating or reviewing.
 
-The app now surfaces startup warnings for common setup mistakes such as missing `ffmpeg`, a missing shared-state path, or missing music/config files.
+The app now surfaces startup warnings for common setup mistakes such as missing `ffmpeg`, missing Supabase reachability, or missing music/config files.
 
 ## Manual overrides
 

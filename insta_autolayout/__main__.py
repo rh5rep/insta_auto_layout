@@ -87,6 +87,7 @@ def main() -> None:
         )
         return
     config = load_run_config(args.config)
+    project_id = args.project or "trybe"
 
     input_arg = config_value(args.input, config.input)
     output_arg = config_value(args.output, config.output)
@@ -121,7 +122,12 @@ def main() -> None:
         raise SystemExit(f"Input folder does not exist: {input_dir}")
 
     _emit_progress("setup", "Preparing overrides", current=0, total=1, percent=2)
-    overrides = load_manual_overrides(input_dir, manual_overrides, shared_state_dir=shared_state_dir)
+    overrides = load_manual_overrides(
+        input_dir,
+        manual_overrides,
+        shared_state_dir=shared_state_dir,
+        project_id=project_id,
+    )
     input_signature = compute_input_signature(input_dir)
     outcome = load_scan_outcome(cache_dir, input_signature)
     scan_cache_hit = outcome is not None
@@ -149,6 +155,8 @@ def main() -> None:
     candidates = apply_candidate_feedback(candidates, overrides)
     if not candidates:
         raise SystemExit("No usable promo candidates were produced from the input media.")
+    if overrides.get("generated_feedback_error"):
+        print(f"learned feedback unavailable: {overrides['generated_feedback_error']}")
     if overrides.get("derived_path"):
         print(f"learned feedback: {overrides['derived_path']}")
     if overrides.get("manual_path"):
@@ -235,6 +243,7 @@ def main() -> None:
             "manual_overrides_paths": list(overrides.get("paths", [])),
             "derived_overrides_path": str(overrides.get("derived_path")) if overrides.get("derived_path") else None,
             "using_generated_feedback": bool(overrides.get("using_generated_feedback")),
+            "project_id": project_id,
         }
         (batch_output_dir / "review_context.json").write_text(json.dumps(review_context, indent=2), encoding="utf-8")
         if spec.get("archive_output"):

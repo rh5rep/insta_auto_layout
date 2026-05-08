@@ -96,6 +96,50 @@ class FeedbackRecorder:
             self.summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return summary
 
+    def clear_structured(self, *, reviewer_id: str, batch_id: str, concept_id: str | None = None) -> dict:
+        with self._lock:
+            removed_local = 0
+            if self.structured_feedback_path.exists():
+                kept_lines: list[str] = []
+                for line in self.structured_feedback_path.read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    raw = json.loads(line)
+                    same_reviewer = str(raw.get("reviewer_id") or "") == reviewer_id
+                    same_batch = str(raw.get("batch_id") or self.batch_dir.name) == batch_id
+                    same_concept = concept_id is None or str(raw.get("concept_id") or "") == concept_id
+                    if same_reviewer and same_batch and same_concept:
+                        removed_local += 1
+                    else:
+                        kept_lines.append(line)
+                if kept_lines:
+                    self.structured_feedback_path.write_text("\n".join(kept_lines) + "\n", encoding="utf-8")
+                else:
+                    self.structured_feedback_path.unlink(missing_ok=True)
+            shared_summary = None
+            if self.context.shared_state_dir is not None or self.context.project_id:
+                from .shared_state import SharedReviewState, shared_review_backend_available
+
+                if self.context.shared_state_dir is not None or shared_review_backend_available():
+                    state = SharedReviewState(self.context.shared_state_dir, project_id=self.context.project_id)
+                    state.delete_events(batch_id=batch_id, reviewer_id=reviewer_id, concept_id=concept_id)
+                    shared_summary = state.rebuild_summary(batch_id)
+            overrides_state = self._load_manual_overrides()
+            summary = self._feedback_summary(overrides_state)
+            summary["structured_event_count"] = _jsonl_count(self.structured_feedback_path)
+            summary["deleted_local_events"] = removed_local
+            if shared_summary is not None:
+                summary["shared_state"] = {
+                    "root": (
+                        str(self.context.shared_state_dir / "review_state")
+                        if self.context.shared_state_dir is not None
+                        else f"supabase://review_events/{self.context.project_id}"
+                    ),
+                    "event_count": shared_summary.get("event_count"),
+                }
+            self.summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+            return summary
+
     def _normalize_structured_event(self, payload: dict) -> dict:
         target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
         event = {
@@ -122,20 +166,24 @@ class FeedbackRecorder:
             return event
 
     def _record_shared_event(self, event: dict) -> dict | None:
-        if self.context.shared_state_dir is None:
+        from .shared_state import SharedReviewState, shared_review_backend_available
+
+        if self.context.shared_state_dir is None and not shared_review_backend_available():
             return None
         try:
-            from .shared_state import SharedReviewState
-
-            state = SharedReviewState(self.context.shared_state_dir)
+            state = SharedReviewState(self.context.shared_state_dir, project_id=self.context.project_id)
             saved = state.append_event(event)
             batch_id = str(saved.get("batch_id") or self.batch_dir.name)
             summary = state.rebuild_summary(batch_id)
             state.rebuild_manual_overrides()
             return {
-                "root": str(state.review_state_dir),
+                "root": state.backend_label,
                 "event_count": summary.get("event_count"),
-                "summary_path": str(state.review_state_dir / "summaries" / f"{batch_id}.summary.json"),
+                "summary_path": (
+                    str(state.review_state_dir / "summaries" / f"{batch_id}.summary.json")
+                    if state.review_state_dir is not None
+                    else None
+                ),
             }
         except Exception as exc:
             return {"error": str(exc)}
@@ -238,13 +286,19 @@ class _ReviewHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in {"/api/feedback", "/api/review/events"}:
+        if parsed.path not in {"/api/feedback", "/api/review/events", "/api/review/clear"}:
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
             return
         length = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
         if parsed.path == "/api/review/events":
             summary = self.recorder.record_structured(payload)
+        elif parsed.path == "/api/review/clear":
+            summary = self.recorder.clear_structured(
+                reviewer_id=str(payload.get("reviewer_id") or self.recorder.context.reviewer_id),
+                batch_id=str(payload.get("batch_id") or self.recorder.batch_dir.name),
+                concept_id=str(payload.get("concept_id") or "").strip() or None,
+            )
         else:
             summary = self.recorder.record(payload)
         body = json.dumps({"ok": True, "summary": summary}).encode("utf-8")

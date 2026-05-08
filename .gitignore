@@ -5,6 +5,8 @@
 
 .venv/
 venv/
+.env
+.env.*
 __pycache__/
 insta_autolayout/__pycache__/
 

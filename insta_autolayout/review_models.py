@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+import hashlib
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -49,7 +51,14 @@ class ReviewEvent:
 
     def with_defaults(self) -> "ReviewEvent":
         if not self.event_id:
-            self.event_id = make_event_id(self.reviewer_id)
+            self.event_id = make_event_id(
+                self.reviewer_id,
+                project_id=self.project_id,
+                batch_id=self.batch_id,
+                concept_id=self.concept_id,
+                variant_id=self.variant_id,
+                target=self.target,
+            )
         if not self.created_at:
             self.created_at = utc_now_iso()
         return self
@@ -93,7 +102,26 @@ def normalize_target(target: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def make_event_id(reviewer_id: str) -> str:
+def make_event_id(
+    reviewer_id: str,
+    *,
+    project_id: str | None = None,
+    batch_id: str | None = None,
+    concept_id: str | None = None,
+    variant_id: str | None = None,
+    target: dict[str, Any] | None = None,
+) -> str:
+    if project_id and batch_id and target:
+        payload = {
+            "reviewer_id": reviewer_id,
+            "project_id": project_id,
+            "batch_id": batch_id,
+            "concept_id": concept_id or "",
+            "variant_id": variant_id or "",
+            "target": _stable_target(target),
+        }
+        digest = hashlib.sha1(json.dumps(payload, sort_keys=True, ensure_ascii=True).encode("utf-8")).hexdigest()[:16]
+        return f"state-{digest}"
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{timestamp}-{reviewer_id}-{uuid4().hex[:8]}"
 
@@ -106,3 +134,20 @@ def _required_str(value: Any, field_name: str) -> str:
     if value is None or str(value) == "":
         raise ValueError(f"{field_name} is required")
     return str(value)
+
+
+def _stable_target(target: dict[str, Any]) -> dict[str, Any]:
+    target_type = str(target.get("type") or "")
+    if target_type == "concept":
+        return {"type": "concept"}
+    if target_type == "brand_card":
+        return {"type": "brand_card", "role": str(target.get("role") or "brand_card")}
+    if target_type == "source_file":
+        return {"type": "source_file", "source_file": str(target.get("source_file") or "")}
+    if target_type == "clip":
+        return {
+            "type": "clip",
+            "clip_token": str(target.get("clip_token") or ""),
+            "source_file": str(target.get("source_file") or ""),
+        }
+    return {"type": target_type}

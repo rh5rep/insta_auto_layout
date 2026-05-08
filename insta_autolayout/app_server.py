@@ -15,8 +15,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from .cloud_env import r2_enabled, supabase_enabled
 from .local_settings import load_local_settings, save_local_settings
 from .promo_exporter import refresh_review_assets
+from .r2_publish import publish_batch_zip, r2_publish_available
+from .supabase_state import fetch_remote_derived_feedback
 
 
 _JOBS: dict[str, dict] = {}
@@ -75,6 +78,11 @@ class _LocalAppHandler(BaseHTTPRequestHandler):
             self._send_json(_start_generation_job(warm_cache_only=True))
         elif parsed.path == "/api/generate-batch":
             self._send_json(_start_generation_job(warm_cache_only=False))
+        elif parsed.path == "/api/publish-batch":
+            try:
+                self._send_json(_publish_selected_batch())
+            except ValueError as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
         elif parsed.path == "/api/choose-path":
             try:
                 self._send_json(_choose_path(self._read_json_body()))
@@ -89,6 +97,12 @@ class _LocalAppHandler(BaseHTTPRequestHandler):
             try:
                 payload = self._read_json_body()
                 self._send_json(_record_review_event(payload))
+            except ValueError as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+        elif parsed.path == "/api/review/clear":
+            try:
+                payload = self._read_json_body()
+                self._send_json(_clear_review_events(payload))
             except ValueError as exc:
                 self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
         else:
@@ -438,13 +452,13 @@ def _render_app_shell(settings: dict[str, str]) -> str:
     <details>
       <summary>How to use this app</summary>
       <div class="help-body">
-        <p>This local app is the control panel for generating Trybe batches and reviewing them. It runs on this computer and writes shared review data to OneDrive when the shared state directory is set.</p>
+        <p>This local app is the control panel for generating Trybe batches and reviewing them. It runs on this computer, stores heavy output batches locally, and can sync shared review data through Supabase when configured.</p>
         <ul>
           <li><strong>Reviewer:</strong> choose Rami or Max before saving feedback.</li>
           <li><strong>Input directory:</strong> the source media folder.</li>
           <li><strong>Output directory:</strong> where the next generated batch is written.</li>
           <li><strong>Archive directory:</strong> optional OneDrive archive destination for completed batches.</li>
-          <li><strong>Shared state directory:</strong> the OneDrive root that will contain <code>review_state</code>.</li>
+          <li><strong>Shared state directory:</strong> optional local mirror/archive root for <code>review_state</code>. Supabase can be the primary shared state even when this is empty.</li>
           <li><strong>Config path:</strong> optional JSON config. If set, it supplies generation defaults.</li>
           <li><strong>Review batch directory:</strong> any exported batch folder you want to open in the review UI, including older batches.</li>
         </ul>
@@ -467,6 +481,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
           <select name="preset_id" id="preset-select"></select>
         </label>
         <p id="preset-description" class="muted"></p>
+        <div id="generation-mode-status"></div>
       </section>
       <section>
         <h2>Startup Checks</h2>
@@ -475,6 +490,10 @@ def _render_app_shell(settings: dict[str, str]) -> str:
       <section>
         <h2>Learned Feedback</h2>
         <div id="learned-feedback-status"></div>
+      </section>
+      <section>
+        <h2>Backend Status</h2>
+        <div id="backend-status"></div>
       </section>
       <section>
         <h2>Paths</h2>
@@ -495,7 +514,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
             <button type="button" class="secondary" data-reveal="archive_dir">Open</button>
           </div>
           <div class="path-field">
-            <label>Shared state directory<input type="text" name="shared_state_dir" autocomplete="off"></label>
+            <label>Shared state directory (optional local mirror)<input type="text" name="shared_state_dir" autocomplete="off"></label>
             <button type="button" class="secondary" data-choose="shared_state_dir" data-kind="directory">Choose</button>
             <button type="button" class="secondary" data-reveal="shared_state_dir">Open</button>
           </div>
@@ -529,7 +548,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
       </section>
       <section>
         <h2>Generation Controls</h2>
-        <p class="muted">These are real generator settings. They override the selected preset when filled. Exact clip count is currently planned automatically from target length, style, and punchiness.</p>
+        <p class="muted">These fields are the exact values the next run will use. Choosing a preset fills them in for you; editing them here changes the actual next generation even if a preset is selected. Exact clip count is currently planned automatically from target length, style, and punchiness.</p>
         <div class="grid">
           <label>Videos to generate<input type="number" name="count" min="1" max="200" step="1"></label>
           <label>Duration min seconds<input type="number" name="duration_min" min="4" max="60" step="0.5"></label>
@@ -569,6 +588,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
           <button type="submit">Save Settings</button>
           <button type="button" class="secondary" data-action="/api/warm-cache">Warm Cache</button>
           <button type="button" class="secondary" data-action="/api/generate-batch">Generate Batch</button>
+          <button type="button" class="secondary" data-action="/api/publish-batch">Publish Batch Zip</button>
           <a id="open-latest-review" class="button secondary {latest_disabled}" href="{latest_href}">Open Selected Review</a>
         </div>
         <div class="status-row">
@@ -593,12 +613,15 @@ def _render_app_shell(settings: dict[str, str]) -> str:
     const form = document.querySelector("#settings-form");
     const presetSelect = document.querySelector("#preset-select");
     const presetDescription = document.querySelector("#preset-description");
+    const generationModeStatus = document.querySelector("#generation-mode-status");
     const startupChecks = document.querySelector("#startup-checks");
     const learnedFeedbackStatus = document.querySelector("#learned-feedback-status");
+    const backendStatus = document.querySelector("#backend-status");
     const statusBox = document.querySelector("#status");
     const jobState = document.querySelector("#job-state");
     const jobIdNode = document.querySelector("#job-id");
     const openLatestReviewLink = document.querySelector("#open-latest-review");
+    const publishBatchButton = document.querySelector('[data-action="/api/publish-batch"]');
     const jobProgressFill = document.querySelector("#job-progress-fill");
     const jobProgressLabel = document.querySelector("#job-progress-label");
     const jobProgressValue = document.querySelector("#job-progress-value");
@@ -649,10 +672,46 @@ def _render_app_shell(settings: dict[str, str]) -> str:
         return;
       }}
       if (generatedPath) {{
-        learnedFeedbackStatus.innerHTML = `<p class="muted">Shared state is configured, but no generated feedback file exists yet.<br><code>${{generatedPath}}</code></p>`;
+        learnedFeedbackStatus.innerHTML = `<p class="muted">Shared review is configured, but no generated feedback payload exists yet.<br><code>${{generatedPath}}</code></p>`;
         return;
       }}
-      learnedFeedbackStatus.innerHTML = '<p class="muted">Set `Shared state directory` to enable automatic learned feedback on future generations.</p>';
+      if ((payload.shared_backend || "") === "supabase") {{
+        learnedFeedbackStatus.innerHTML = '<p class="muted">Supabase is configured, but there is no derived feedback for this project yet.</p>';
+        return;
+      }}
+      learnedFeedbackStatus.innerHTML = '<p class="muted">Set `Shared state directory` or configure Supabase to enable automatic learned feedback on future generations.</p>';
+    }}
+
+    function renderBackendStatus(payload) {{
+      const rows = [];
+      const sharedBackend = payload.shared_backend || "local";
+      const remoteReady = sharedBackend === "supabase";
+      rows.push(
+        remoteReady
+          ? '<li class="diag-ok"><strong>Shared review backend:</strong> Supabase is configured.</li>'
+          : '<li class="diag-warning"><strong>Shared review backend:</strong> Local-only fallback. Configure Supabase for cross-machine shared review learning.</li>'
+      );
+
+      if (payload.r2_publish_available) {{
+        rows.push('<li class="diag-ok"><strong>Batch publishing:</strong> R2 publish is available from this machine.</li>');
+      }} else {{
+        rows.push('<li class="diag-warning"><strong>Batch publishing:</strong> R2 is not configured, so `Publish Batch Zip` will stay unavailable.</li>');
+      }}
+
+      const sharedMirror = String(form.elements.shared_state_dir?.value || "").trim();
+      if (sharedMirror) {{
+        rows.push(`<li class="diag-info"><strong>Local review mirror:</strong> <code>${{sharedMirror}}</code></li>`);
+      }} else {{
+        rows.push('<li class="muted"><strong>Local review mirror:</strong> not set. Shared review can still work through Supabase alone.</li>');
+      }}
+
+      backendStatus.innerHTML = `<ul class="diag-list">${{rows.join("")}}</ul>`;
+      if (publishBatchButton) {{
+        publishBatchButton.disabled = !payload.r2_publish_available;
+        publishBatchButton.title = payload.r2_publish_available
+          ? "Upload the selected batch as a zip and get a temporary download link."
+          : "Configure R2 in .env to enable publishing.";
+      }}
     }}
 
     function updateLatestReviewLink(pathValue) {{
@@ -700,6 +759,17 @@ def _render_app_shell(settings: dict[str, str]) -> str:
     function updatePresetDescription() {{
       const preset = selectedPreset();
       presetDescription.textContent = preset ? preset.description : "Use this when you want to fill paths manually or use a one-off config.";
+      renderGenerationMode();
+    }}
+
+    function renderGenerationMode() {{
+      const preset = selectedPreset();
+      if (!generationModeStatus) return;
+      if (!preset) {{
+        generationModeStatus.innerHTML = '<p class="diag-info">Current run mode: custom/manual. The values shown below are the exact values that will be used on the next generation.</p>';
+        return;
+      }}
+      generationModeStatus.innerHTML = `<p class="diag-info">Current run mode: preset-backed. <strong>${{preset.label}}</strong> has filled the form, and the values currently shown below are the exact values that will be used on the next generation. Editing any field here changes the next run.</p>`;
     }}
 
     function applyPreset(preset) {{
@@ -763,6 +833,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
       const payload = await response.json();
       renderStartupChecks(payload);
       renderLearnedFeedbackStatus(payload);
+      renderBackendStatus(payload);
     }}
 
     for (const button of document.querySelectorAll("[data-action]")) {{
@@ -840,6 +911,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
     writeForm(initialSettings);
     renderStartupChecks(initialStartupCheck);
     renderLearnedFeedbackStatus(initialStartupCheck);
+    renderBackendStatus(initialStartupCheck);
   </script>
 </body>
 </html>
@@ -947,6 +1019,7 @@ def _startup_check(settings: dict[str, str]) -> dict[str, object]:
     warnings: list[str] = []
     generated_feedback_path = ""
     using_generated_feedback = False
+    shared_backend = "supabase" if supabase_enabled() else "local"
 
     if not shutil.which("ffmpeg"):
         warnings.append("`ffmpeg` is not on PATH. Rendering may still work through bundled helpers on some machines, but install ffmpeg for predictable setup.")
@@ -965,17 +1038,29 @@ def _startup_check(settings: dict[str, str]) -> dict[str, object]:
     if settings.get("input_dir") and input_dir is None:
         issues.append("Input directory does not exist.")
 
+    project_id = (settings.get("project_id") or "trybe").strip() or "trybe"
     shared_state_dir = settings.get("shared_state_dir", "").strip()
-    if shared_state_dir:
+    remote_feedback = None
+    if supabase_enabled():
+        try:
+            remote_feedback = fetch_remote_derived_feedback(project_id)
+        except Exception as exc:
+            warnings.append(f"Supabase is configured, but learned feedback could not be read yet: {exc}")
+    if isinstance(remote_feedback, dict):
+        generated_feedback_path = f"supabase://derived_feedback/{project_id}"
+        using_generated_feedback = True
+    elif shared_state_dir:
         shared_path = Path(shared_state_dir).expanduser()
         generated_feedback_file = _generated_feedback_path(shared_path)
         generated_feedback_path = str(generated_feedback_file)
         if not shared_path.exists():
-            warnings.append("Shared state directory does not exist yet. The app can create `review_state`, but make sure this path is really the synced OneDrive folder on this machine.")
+            warnings.append("Shared state directory does not exist yet. The app can create `review_state` there if you want a local mirror/archive.")
         else:
             using_generated_feedback = generated_feedback_file.exists()
+    elif not supabase_enabled():
+        warnings.append("No shared review backend is configured. Add Supabase env vars or set a shared state directory if you want review learning to persist across machines.")
     else:
-        warnings.append("Shared state directory is empty. Review events will not save until it is set.")
+        warnings.append("Shared state directory is empty. That is fine if Supabase is your shared backend; set it only if you also want a local mirror.")
 
     config_path = _existing_path(settings.get("config_path", ""))
     if settings.get("config_path") and config_path is None:
@@ -1009,6 +1094,8 @@ def _startup_check(settings: dict[str, str]) -> dict[str, object]:
         "platform": sys.platform,
         "generated_feedback_path": generated_feedback_path,
         "using_generated_feedback": using_generated_feedback,
+        "shared_backend": shared_backend,
+        "r2_publish_available": r2_enabled(),
     }
 
 
@@ -1306,8 +1393,8 @@ def _record_review_event(payload: dict) -> dict:
     if not latest_dir.exists():
         raise ValueError("latest_batch_dir is required before saving review events")
     shared_state_dir = settings.get("shared_state_dir") or ""
-    if not shared_state_dir:
-        raise ValueError("shared_state_dir is required before saving review events")
+    if not shared_state_dir and not supabase_enabled():
+        raise ValueError("Set `shared_state_dir` or configure Supabase before saving review events")
     payload = dict(payload)
     payload["batch_id"] = payload.get("batch_id") or latest_dir.name
     payload["reviewer_id"] = settings.get("reviewer_id") or payload.get("reviewer_id") or "rami"
@@ -1315,8 +1402,59 @@ def _record_review_event(payload: dict) -> dict:
 
     from .shared_state import SharedReviewState
 
-    state = SharedReviewState(shared_state_dir)
+    state = SharedReviewState(shared_state_dir or None, project_id=str(payload["project_id"]))
     event = state.append_event(payload)
     summary = state.rebuild_summary(str(event["batch_id"]))
     state.rebuild_manual_overrides()
     return {"ok": True, "event": event, "summary": summary}
+
+
+def _clear_review_events(payload: dict) -> dict:
+    settings = load_local_settings()
+    latest_dir = Path(settings.get("latest_batch_dir") or "").expanduser().resolve()
+    if not latest_dir.exists():
+        raise ValueError("latest_batch_dir is required before clearing review events")
+    shared_state_dir = settings.get("shared_state_dir") or ""
+    if not shared_state_dir and not supabase_enabled():
+        raise ValueError("Set `shared_state_dir` or configure Supabase before clearing review events")
+    batch_id = str(payload.get("batch_id") or latest_dir.name)
+    concept_id = str(payload.get("concept_id") or "").strip() or None
+    reviewer_id = settings.get("reviewer_id") or str(payload.get("reviewer_id") or "rami")
+    project_id = settings.get("project_id") or str(payload.get("project_id") or "trybe")
+
+    from .shared_state import SharedReviewState
+
+    state = SharedReviewState(shared_state_dir or None, project_id=str(project_id))
+    deleted = state.delete_events(batch_id=batch_id, reviewer_id=str(reviewer_id), concept_id=concept_id)
+    summary = state.rebuild_summary(batch_id)
+    return {
+        "ok": True,
+        "deleted": deleted,
+        "batch_id": batch_id,
+        "concept_id": concept_id,
+        "reviewer_id": reviewer_id,
+        "summary": summary,
+    }
+
+
+def _publish_selected_batch() -> dict:
+    settings = load_local_settings()
+    batch_dir_raw = (settings.get("latest_batch_dir") or "").strip()
+    if not batch_dir_raw:
+        raise ValueError("Set `Review batch directory` before publishing a batch zip")
+    if not r2_publish_available():
+        raise ValueError("R2 is not configured in `.env`")
+    batch_dir = Path(batch_dir_raw).expanduser().resolve()
+    if not batch_dir.exists() or not batch_dir.is_dir():
+        raise ValueError("Review batch directory does not exist")
+    reviewer_id = (settings.get("reviewer_id") or "rami").strip() or "rami"
+    project_id = (settings.get("project_id") or "trybe").strip() or "trybe"
+    published = publish_batch_zip(batch_dir, project_id=project_id, reviewer_id=reviewer_id)
+    return {
+        "ok": True,
+        "batch_dir": str(batch_dir),
+        "object_key": published.object_key,
+        "download_url": published.download_url,
+        "expires_at": published.expires_at,
+        "size_bytes": published.size_bytes,
+    }

@@ -28,13 +28,16 @@ See `docs/local_first_review_system.md` for the living product and technical dir
 - Done: Add bounded generation controls for real supported CLI settings
 - Done: test the app with a real OneDrive Trybe batch end to end with Rami and Max reviewer settings
 - Done: make a double-click launcher for Max
+- Done: decouple shared review learning from shared OneDrive paths by adding Supabase-backed review state
+- Done: add optional R2 batch zip publishing instead of making cloud storage mandatory for every batch
 
 ## Later
 
 - Add local SQLite index for fast search and dashboards
 - Feed richer review summaries into candidate scoring, trim selection, planner strategy weights, and diversity tuning
 - Add optional review coverage / watch-depth metadata later if we start using external reviewers or need stronger confidence signals
+- Add a real batch registry in Supabase so published batch links can be re-opened without manual sharing
+- Add browser-openable remote review publishing if zip handoff becomes too clumsy
 - Do we want to do this with audio/text scripts
 - Max will have 2 cut-up videos
 - I will try and get v0 of review platform
-- Figure out simple storage/file transfer through programatic interfaces because of onedrive organizational issues
