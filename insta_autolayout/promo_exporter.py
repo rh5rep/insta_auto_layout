@@ -108,6 +108,9 @@ class PromoExporter:
                     "concept_id": output.concept.concept_id,
                     "style": output.concept.style,
                     "strategy": output.concept.strategy,
+                    "recipe_name": output.report.get("recipe_name"),
+                    "concept_family": output.report.get("concept_family"),
+                    "creative_intent": output.report.get("creative_intent"),
                     "target_duration": output.concept.target_duration,
                     "clip_count": len(output.concept.timeline),
                     "overlap": _manifest_overlap(concept_overlap),
@@ -201,9 +204,27 @@ class PromoExporter:
 
 
 def _apply_text_overlay(clip, text_overlays: dict[str, Any], canvas_size: tuple[int, int]):
+    clip_duration = float(clip.duration or 0.0)
+    if clip_duration <= 0.0:
+        return clip
     overlay_image = _overlay_image(text_overlays, canvas_size)
-    overlay = ImageClip(np.array(overlay_image)).with_duration(float(clip.duration or 0.0)).with_position(("center", "center"))
-    return CompositeVideoClip([clip, overlay], size=canvas_size)
+    start_sec = _bounded_float(text_overlays.get("start_sec"), 0.0, minimum=0.0, maximum=clip_duration)
+    requested_duration = _bounded_float(
+        text_overlays.get("duration_sec", text_overlays.get("duration")),
+        clip_duration,
+        minimum=0.0,
+        maximum=clip_duration,
+    )
+    overlay_duration = min(clip_duration - start_sec, requested_duration)
+    if overlay_duration <= 0.0:
+        return clip
+    overlay = (
+        ImageClip(np.array(overlay_image))
+        .with_start(start_sec)
+        .with_duration(overlay_duration)
+        .with_position(("center", "center"))
+    )
+    return CompositeVideoClip([clip, overlay], size=canvas_size).with_duration(clip_duration)
 
 
 def _with_brand_cards(clips: list, brand_cards: dict[str, Any] | None, canvas_size: tuple[int, int]) -> list:
@@ -318,6 +339,14 @@ def _duration_value(value: object, fallback: float) -> float:
         return fallback
 
 
+def _bounded_float(value: object, fallback: float, *, minimum: float, maximum: float) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, min(result, maximum))
+
+
 def _overlay_image(text_overlays: dict[str, Any], canvas_size: tuple[int, int]) -> Image.Image:
     width, height = canvas_size
     headline = str(text_overlays.get("headline") or "").strip()
@@ -430,8 +459,10 @@ def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.I
 def write_review_assets(output_dir: Path, manifest: list[dict[str, Any]]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest = _enrich_review_manifest(output_dir, manifest)
+    review_context = _review_context(output_dir, manifest)
     (output_dir / "index.html").write_text(_index_html(manifest), encoding="utf-8")
-    (output_dir / "review.html").write_text(_review_html_v2(), encoding="utf-8")
+    (output_dir / "review_context.json").write_text(json.dumps(review_context, indent=2), encoding="utf-8")
+    (output_dir / "review.html").write_text(_review_html_v2(review_context), encoding="utf-8")
 
 
 def refresh_review_assets(output_dir: Path) -> bool:
@@ -464,11 +495,33 @@ def _enrich_review_manifest(output_dir: Path, manifest: list[dict[str, Any]]) ->
                 item["target_duration"] = float(timeline[-1].get("timeline_end") or 0.0)
             if not item.get("strategy") and isinstance(report, dict):
                 item["strategy"] = report.get("strategy") or item.get("strategy")
+            if not item.get("recipe_name") and isinstance(report, dict):
+                item["recipe_name"] = report.get("recipe_name") or item.get("recipe_name")
+            if not item.get("concept_family") and isinstance(report, dict):
+                item["concept_family"] = report.get("concept_family") or item.get("concept_family")
+            if not item.get("creative_intent") and isinstance(report, dict):
+                item["creative_intent"] = report.get("creative_intent") or item.get("creative_intent")
         item.setdefault("clip_count", 0)
         item.setdefault("target_duration", 0.0)
         item.setdefault("strategy", "unknown")
         enriched.append(item)
     return enriched
+
+
+def _review_context(output_dir: Path, manifest: list[dict[str, Any]]) -> dict[str, Any]:
+    reports: dict[str, Any] = {}
+    for record in manifest:
+        concept_id = str(record.get("concept_id") or "").strip()
+        if not concept_id:
+            continue
+        report_path = output_dir / concept_id / "report.json"
+        if not report_path.exists():
+            continue
+        try:
+            reports[concept_id] = json.loads(report_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+    return {"manifest": manifest, "reports": reports}
 
 
 def _fit_video_to_canvas(clip, canvas_size: tuple[int, int], crop_strategy: str):
@@ -573,6 +626,8 @@ def _batch_overlap_report(outputs: list[PromoOutput]) -> dict[str, Any]:
             {
                 "concept_id": output.concept.concept_id,
                 "strategy": output.concept.strategy,
+                "recipe_name": output.report.get("recipe_name"),
+                "concept_family": output.report.get("concept_family"),
                 "clip_count": len(output.concept.timeline),
                 "unique_candidate_count": len(current["candidate_ids"]),
                 "unique_source_count": len(current["source_files"]),
@@ -757,11 +812,12 @@ def _index_html(manifest: list[dict]) -> str:
               {preview_block}
               <div class="card-top">
                 <div>
-                  <p class="eyebrow">{record["concept_id"]}</p>
-                  <h2>{_strategy_label(record["strategy"])}</h2>
+                  <p class="eyebrow">{escape(str(record.get("concept_family") or record["concept_id"]))}</p>
+                  <h2>{escape(str(record.get("recipe_name") or _strategy_label(record["strategy"])))}</h2>
                 </div>
                 <span class="pill {overlap_class}">{overlap_label}</span>
               </div>
+              <p class="meta">{escape(_strategy_label(str(record.get("strategy") or "unknown")))}</p>
               <div class="metric-grid">
                 <div class="metric">
                   <span>Target</span>
@@ -1141,8 +1197,9 @@ def _index_html(manifest: list[dict]) -> str:
 </html>"""
 
 
-def _review_html_v2() -> str:
-    return """<!doctype html>
+def _review_html_v2(review_context: dict[str, Any] | None = None) -> str:
+    context_json = json.dumps(review_context or {"manifest": [], "reports": {}}, separators=(",", ":")).replace("</", "<\\/")
+    template = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -1248,21 +1305,92 @@ def _review_html_v2() -> str:
       background: #000;
     }
     .timeline {
-      display: flex;
-      gap: 3px;
       padding: 10px;
       border-top: 1px solid var(--line);
       background: #f8fafc;
     }
+    .timeline-overview {
+      position: relative;
+      height: 12px;
+      border-radius: 999px;
+      background: #e7edf6;
+      overflow: hidden;
+    }
+    .overview-segment {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      opacity: .95;
+      border-right: 1px solid rgba(255, 255, 255, .45);
+    }
+    .overview-segment.video {
+      background: #95b3ff;
+    }
+    .overview-segment.image {
+      background: #9fd5b4;
+    }
+    .overview-segment.brand_card {
+      background: #cab8ff;
+    }
+    .overview-segment.active {
+      box-shadow: inset 0 0 0 2px var(--accent);
+      z-index: 2;
+    }
+    .timeline-playhead {
+      position: absolute;
+      top: -2px;
+      bottom: -2px;
+      width: 2px;
+      background: var(--ink);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, .55);
+      transform: translateX(-1px);
+      z-index: 3;
+    }
+    .timeline-rail-wrap {
+      margin-top: 10px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: thin;
+    }
+    .timeline-rail {
+      display: flex;
+      gap: 8px;
+      min-width: max-content;
+    }
     .segment {
-      min-width: 18px;
-      height: 42px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 44px;
+      width: 44px;
+      min-width: 44px;
+      height: 52px;
       border: 1px solid #c8d1df;
-      border-radius: 6px;
+      border-radius: 8px;
       background: #fff;
       color: #344054;
-      font-size: 11px;
-      overflow: hidden;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      position: relative;
+    }
+    .segment::after {
+      content: "";
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: 6px;
+      height: 3px;
+      border-radius: 999px;
+      background: #d7dfec;
+    }
+    .segment[data-kind="video"]::after {
+      background: #95b3ff;
+    }
+    .segment[data-kind="image"]::after {
+      background: #9fd5b4;
+    }
+    .segment[data-kind="brand_card"]::after {
+      background: #cab8ff;
     }
     .segment.active {
       border-color: var(--accent);
@@ -1272,10 +1400,52 @@ def _review_html_v2() -> str:
     }
     .segment span {
       display: block;
-      padding: 5px 6px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      line-height: 1;
+    }
+    .timeline-neighborhood {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .neighbor {
+      border: 1px solid #d6ddea;
+      border-radius: 8px;
+      background: #fff;
+      padding: 8px;
+      min-height: 72px;
+      text-align: left;
+      font: inherit;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .neighbor.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      box-shadow: inset 0 -3px 0 var(--accent);
+    }
+    .neighbor-role {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .neighbor-title {
+      display: block;
+      margin-top: 5px;
+      font-size: 12px;
+      font-weight: 650;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+    .neighbor-time {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
     }
     .current {
       display: grid;
@@ -1367,11 +1537,12 @@ def _review_html_v2() -> str:
     @media (max-width: 980px) {
       .layout { grid-template-columns: 1fr; }
       .current { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .timeline-neighborhood { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
     @media (max-width: 620px) {
       main { padding: 12px; }
       .topbar { align-items: flex-start; flex-direction: column; }
-      .current, .status-grid, .target-grid, .tags, .quick { grid-template-columns: 1fr; }
+      .current, .status-grid, .target-grid, .tags, .quick, .timeline-neighborhood { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -1379,12 +1550,16 @@ def _review_html_v2() -> str:
   <main>
     <div id="app">Loading review...</div>
   </main>
+  <script id="review-bootstrap" type="application/json">__REVIEW_BOOTSTRAP__</script>
   <script>
     const params = new URLSearchParams(window.location.search);
     let conceptId = params.get("concept");
     const app = document.getElementById("app");
+    const reviewBootstrap = document.getElementById("review-bootstrap");
+    const reviewContext = reviewBootstrap ? JSON.parse(reviewBootstrap.textContent || "{}") : {};
     const reviewerId = localStorage.getItem("insta_autolayout.reviewer_id") || "rami";
     const projectId = localStorage.getItem("insta_autolayout.project_id") || "trybe";
+    let selectedVariantAudioMode = null;
     const statusOptions = ["unreviewed", "shortlist", "approved", "needs_edit", "reject"];
     const targetHelp = {
       concept: "Use this when your feedback is about the whole video: pacing, story, hook, music fit, or whether it is post-worthy.",
@@ -1412,14 +1587,32 @@ def _review_html_v2() -> str:
       return String(path || "").split("/").pop() || "unknown";
     }
 
+    function itemKind(item) {
+      if (!item) return "unknown";
+      if (item.review_type === "brand_card") return "brand_card";
+      return item.source_type === "image" ? "image" : "video";
+    }
+
     function timeRange(start, end) {
       return `${Number(start || 0).toFixed(1)}-${Number(end || 0).toFixed(1)}s`;
     }
 
     async function loadJson(path) {
+      const embedded = embeddedJson(path);
+      if (embedded !== null) return embedded;
       const response = await fetch(path);
       if (!response.ok) throw new Error(`${path}: ${response.status}`);
       return response.json();
+    }
+
+    function embeddedJson(path) {
+      if (!reviewContext || typeof reviewContext !== "object") return null;
+      if (path === "batch_manifest.json" && Array.isArray(reviewContext.manifest)) return reviewContext.manifest;
+      const match = String(path || "").match(/^([^/]+)\\/report\\.json$/);
+      if (match && reviewContext.reports && typeof reviewContext.reports === "object") {
+        return reviewContext.reports[match[1]] || null;
+      }
+      return null;
     }
 
     async function postStructured(payload) {
@@ -1492,7 +1685,8 @@ def _review_html_v2() -> str:
     }
 
     function reviewTimeline(report) {
-      const raw = report.timeline || [];
+      const variant = selectedVariantReport(report);
+      const raw = Array.isArray(variant?.timeline) && variant.timeline.length ? variant.timeline : (report.timeline || []);
       const cards = report.brand_cards || {};
       const introDuration = cards.intro ? Number(cards.intro_duration || 1.1) : 0;
       const outroDuration = cards.outro ? Number(cards.outro_duration || 1.35) : 0;
@@ -1531,6 +1725,19 @@ def _review_html_v2() -> str:
         });
       }
       return items;
+    }
+
+    function selectedVariantReport(report) {
+      const variants = Array.isArray(report?.variants) ? report.variants : [];
+      if (!variants.length) return null;
+      return variants.find((item) => item?.audio_mode === selectedVariantAudioMode) || variants[0];
+    }
+
+    function neighborhoodWindow(timeline, centerIndex, radius = 2) {
+      if (!timeline.length) return [];
+      const start = Math.max(0, centerIndex - radius);
+      const end = Math.min(timeline.length, centerIndex + radius + 1);
+      return timeline.slice(start, end).map((item, offset) => ({ item, index: start + offset }));
     }
 
     function generationContext(item, report) {
@@ -1574,11 +1781,15 @@ def _review_html_v2() -> str:
       const record = manifest.find((item) => item.concept_id === conceptId);
       const conceptIndex = manifest.findIndex((item) => item.concept_id === conceptId);
       if (!record) throw new Error(`Concept not found: ${conceptId}`);
-      const report = await loadJson(`${conceptId}/report.json`);
       const variant = record.variants?.[0] || {};
+      selectedVariantAudioMode = variant.audio_mode || null;
+      const report = await loadJson(`${conceptId}/report.json`);
+      const reportVariant = selectedVariantReport(report) || {};
       const timeline = reviewTimeline(report);
-      const mediaClipCount = (report.timeline || []).length;
-      let currentClip = timeline[0] || null;
+      const mediaClipCount = Array.isArray(reportVariant.timeline) && reportVariant.timeline.length
+        ? reportVariant.timeline.length
+        : (report.timeline || []).length;
+      let currentClip = null;
       const previous = conceptIndex > 0 ? manifest[conceptIndex - 1] : null;
       const next = conceptIndex < manifest.length - 1 ? manifest[conceptIndex + 1] : null;
       const totalDuration = Math.max(...timeline.map((item) => Number(item.timeline_end || 0)), Number(record.target_duration || 1), 1);
@@ -1587,8 +1798,8 @@ def _review_html_v2() -> str:
         <div class="topbar">
           <div>
             <div class="meta"><a href="/">Back to setup</a> / <a href="index.html">Back to batch</a> / ${esc(projectId)} / reviewer ${esc(reviewerId)}</div>
-            <h1>${esc(record.concept_id)} - ${esc(String(record.strategy || "").replaceAll("_", " "))}</h1>
-            <div class="meta">${mediaClipCount} media clips + ${timeline.length - mediaClipCount} brand cards / ${Number(totalDuration || 0).toFixed(1)}s review timeline / ${esc(variant.display_name || "variant")}</div>
+            <h1>${esc(record.recipe_name || record.concept_id)}${record.concept_family ? ` / ${esc(record.concept_family)}` : ""}</h1>
+            <div class="meta">${esc(String(record.strategy || "").replaceAll("_", " "))} / ${mediaClipCount} media clips + ${timeline.length - mediaClipCount} brand cards / ${Number(totalDuration || 0).toFixed(1)}s review timeline / ${esc(variant.display_name || "variant")}</div>
           </div>
           <nav class="nav">
             ${previous ? `<a class="button" href="review.html?concept=${previous.concept_id}">Previous</a>` : ""}
@@ -1599,11 +1810,28 @@ def _review_html_v2() -> str:
           <section class="player-panel panel">
             <video id="player" controls playsinline src="${esc(variant.path || "")}"></video>
             <div id="timeline" class="timeline">
-              ${timeline.map((item, index) => `
-                <button class="segment" type="button" data-index="${index}" onclick="window.selectSegment && window.selectSegment(${index})" style="flex: ${Math.max(Number(item.duration || 0.2), 0.2)} 1 0">
-                  <span>${index + 1}. ${esc(item.label || fileName(item.source_file))}</span>
-                </button>
-              `).join("")}
+              <div class="timeline-overview">
+              ${timeline.map((item, index) => {
+                const start = Math.max(Number(item.timeline_start || 0), 0);
+                const end = Math.max(Number(item.timeline_end || start), start);
+                const left = (start / Math.max(totalDuration, 0.001)) * 100;
+                const width = Math.max(((end - start) / Math.max(totalDuration, 0.001)) * 100, 0.35);
+                return `
+                <div class="overview-segment ${itemKind(item)}" data-overview-index="${index}" style="left: ${left}%; width: ${width}%"></div>
+              `;
+              }).join("")}
+                <div id="timeline-playhead" class="timeline-playhead"></div>
+              </div>
+              <div class="timeline-rail-wrap">
+                <div id="timeline-rail" class="timeline-rail">
+                ${timeline.map((item, index) => `
+                  <button class="segment" type="button" data-index="${index}" data-kind="${itemKind(item)}" title="${esc((item.label || fileName(item.source_file)) + " " + timeRange(item.timeline_start, item.timeline_end))}" onclick="window.selectSegment && window.selectSegment(${index})">
+                    <span>${index + 1}</span>
+                  </button>
+                `).join("")}
+                </div>
+              </div>
+              <div id="timeline-neighborhood" class="timeline-neighborhood"></div>
             </div>
             <div class="current">
               <div class="fact"><span>Current source</span><strong id="current-source"></strong></div>
@@ -1657,6 +1885,9 @@ def _review_html_v2() -> str:
 
       const player = document.getElementById("player");
       const segments = [...document.querySelectorAll(".segment")];
+      const overviewSegments = [...document.querySelectorAll(".overview-segment")];
+      const neighborhoodNode = document.getElementById("timeline-neighborhood");
+      const playheadNode = document.getElementById("timeline-playhead");
       const saveStatus = document.getElementById("save-status");
       const reasonTagNode = document.getElementById("reason-tags");
       const targetHelpNode = document.getElementById("target-help");
@@ -1856,21 +2087,65 @@ def _review_html_v2() -> str:
         }, delay);
       }
 
+      function syncPlayhead() {
+        if (!playheadNode) return;
+        const percent = (Number(player.currentTime || 0) / Math.max(totalDuration, 0.001)) * 100;
+        playheadNode.style.left = `${Math.max(0, Math.min(percent, 100))}%`;
+      }
+
+      function renderNeighborhood(index) {
+        if (!neighborhoodNode) return;
+        neighborhoodNode.innerHTML = neighborhoodWindow(timeline, index).map(({ item, index: itemIndex }) => `
+          <button class="neighbor ${itemIndex === index ? "active" : ""}" type="button" data-neighbor-index="${itemIndex}">
+            <span class="neighbor-role">${esc(item.review_type === "brand_card" ? item.card_role || "brand card" : itemKind(item))}</span>
+            <span class="neighbor-title">${esc(item.label || fileName(item.source_file))}</span>
+            <span class="neighbor-time">${esc(timeRange(item.timeline_start, item.timeline_end))}</span>
+          </button>
+        `).join("");
+        neighborhoodNode.querySelectorAll("[data-neighbor-index]").forEach((button) => {
+          button.addEventListener("click", () => {
+            window.selectSegment(Number(button.dataset.neighborIndex));
+          });
+        });
+      }
+
+      function centerSegment(index) {
+        const segment = segments[index];
+        if (!segment) return;
+        segment.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+      }
+
       function setCurrent(item) {
+        if (!item) return;
+        const nextIndex = timeline.indexOf(item);
+        if (currentClip === item) {
+          syncPlayhead();
+          return;
+        }
         storeActiveDraft();
         currentClip = item || currentClip;
-        segments.forEach((segment) => segment.classList.toggle("active", Number(segment.dataset.index) === timeline.indexOf(currentClip)));
+        segments.forEach((segment) => segment.classList.toggle("active", Number(segment.dataset.index) === nextIndex));
+        overviewSegments.forEach((segment) => segment.classList.toggle("active", Number(segment.dataset.overviewIndex) === nextIndex));
         document.getElementById("current-source").textContent = currentClip?.label || fileName(currentClip?.source_file);
         document.getElementById("current-timeline").textContent = currentClip ? timeRange(currentClip.timeline_start, currentClip.timeline_end) : "n/a";
         document.getElementById("current-trim").textContent = currentClip?.source_file ? timeRange(currentClip.source_start, currentClip.source_end) : (currentClip?.card_role || "n/a");
         document.getElementById("current-score").textContent = currentClip?.source_file ? `${Number(currentClip.score_total || 0).toFixed(2)} / ${currentClip.crop_strategy || "crop"}` : "brand card";
+        renderNeighborhood(nextIndex);
+        centerSegment(nextIndex);
+        syncPlayhead();
         updateTargetControls();
         loadDraftForCurrentTarget();
       }
       window.selectSegment = (index) => {
         const item = timeline[Number(index)];
         if (!item) return;
-        player.currentTime = Number(item.timeline_start || 0);
+        const start = Number(item.timeline_start || 0);
+        const end = Number(item.timeline_end || start);
+        const duration = Math.max(0, end - start);
+        const seekTime = duration > 0
+          ? Math.min(end - 0.01, start + Math.min(0.03, Math.max(duration * 0.25, 0.01)))
+          : start;
+        player.currentTime = Math.max(0, seekTime);
         setCurrent(item);
       };
 
@@ -1970,7 +2245,7 @@ def _review_html_v2() -> str:
         }
       });
 
-      setCurrent(currentClip);
+      setCurrent(timeline[0] || null);
     }
 
     load().catch((error) => {
@@ -1979,6 +2254,7 @@ def _review_html_v2() -> str:
   </script>
 </body>
 </html>"""
+    return template.replace("__REVIEW_BOOTSTRAP__", context_json)
 
 
 def _review_html() -> str:
@@ -2454,8 +2730,8 @@ def _review_html() -> str:
         <div class="topline">
           <div>
             <p class="eyebrow">Concept ${conceptIndex + 1} / ${manifest.length}</p>
-            <h1>${html(record.strategy.replaceAll("_", " "))}</h1>
-            <p class="meta">${html(conceptId)} &middot; reviewer ${html(reviewerId)} &middot; project ${html(projectId)}</p>
+            <h1>${html(record.recipe_name || record.strategy.replaceAll("_", " "))}</h1>
+            <p class="meta">${html(record.concept_family || conceptId)} &middot; reviewer ${html(reviewerId)} &middot; project ${html(projectId)}</p>
           </div>
           <div class="small-actions">
             <a class="button-link" href="index.html">Back To Batch</a>

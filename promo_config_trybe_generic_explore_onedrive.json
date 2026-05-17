@@ -1,0 +1,35 @@
+{
+  "input": "/Users/rami/Documents/insta_autolayout/scratch/asset_views/trybe_generic_sports",
+  "output": "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video Gen/trybe-generic-explore",
+  "cache_dir": "/Users/rami/Documents/insta_autolayout/scratch/trybe-explore-cache",
+  "archive_output": "/Users/rami/Library/CloudStorage/OneDrive-DanmarksTekniskeUniversitet/Trybe/Batch Video Gen",
+  "style": "fast_punchy",
+  "duration_min": 12,
+  "duration_max": 16,
+  "scan_depth": "quick",
+  "punchiness": "hyper",
+  "min_bpm": 140,
+  "audio_variants": ["auto"],
+  "music_dir": "/Users/rami/Documents/insta_autolayout/music_cache",
+  "music_manifest": "/Users/rami/Documents/insta_autolayout/soundtrack_manifest.json",
+  "batches": [
+    {
+      "name": "batch_01_balanced",
+      "count": 6,
+      "seed": "trybe-generic-explore-01",
+      "diversity_strength": 1.0
+    },
+    {
+      "name": "batch_02_stronger_diversity",
+      "count": 6,
+      "seed": "trybe-generic-explore-02",
+      "diversity_strength": 1.45
+    },
+    {
+      "name": "batch_03_explore_more",
+      "count": 6,
+      "seed": "trybe-generic-explore-03",
+      "diversity_strength": 1.9
+    }
+  ]
+}

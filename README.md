@@ -66,6 +66,11 @@ python -m insta_autolayout \
   --explain
 ```
 
+Trybe production runbook:
+
+- [docs/trybe_batch_workflow.md](/Users/rami/Documents/insta_autolayout/docs/trybe_batch_workflow.md)
+- starter explore preset: [promo_config_trybe_generic_explore_onedrive.json](/Users/rami/Documents/insta_autolayout/promo_config_trybe_generic_explore_onedrive.json)
+
 ### CLI flags
 
 - `--count 5`

@@ -153,13 +153,33 @@ class _LocalAppHandler(BaseHTTPRequestHandler):
         if not target.exists() or not target.is_file():
             self.send_error(HTTPStatus.NOT_FOUND, "Review asset not found")
             return
-        body = target.read_bytes()
+        size = target.stat().st_size
         content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-        self.send_response(HTTPStatus.OK)
+        range_header = self.headers.get("Range")
+        start = 0
+        end = size - 1
+        status = HTTPStatus.OK
+        if range_header:
+            parsed = _parse_range_header(range_header, size)
+            if parsed is None:
+                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+                return
+            start, end = parsed
+            status = HTTPStatus.PARTIAL_CONTENT
+        length = max(0, end - start + 1)
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == HTTPStatus.PARTIAL_CONTENT:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Content-Length", str(length))
         self.end_headers()
-        self.wfile.write(body)
+        with target.open("rb") as handle:
+            handle.seek(start)
+            self.wfile.write(handle.read(length))
 
     def _send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
@@ -557,6 +577,7 @@ def _render_app_shell(settings: dict[str, str]) -> str:
             <select name="style">
               <option value="">Preset default</option>
               <option value="fast_punchy">Fast punchy</option>
+              <option value="sunny_sips">Sunny Sips premium</option>
               <option value="clean_product_demo">Clean branded/event</option>
               <option value="founder_personal_brand">Founder personal brand</option>
             </select>
@@ -922,6 +943,32 @@ def _path_exists(value: str) -> bool:
     if not value:
         return False
     return Path(value).expanduser().exists()
+
+
+def _parse_range_header(header: str, size: int) -> tuple[int, int] | None:
+    if size <= 0:
+        return None
+    value = str(header).strip()
+    if not value.startswith("bytes="):
+        return None
+    spec = value.removeprefix("bytes=").split(",", 1)[0].strip()
+    if "-" not in spec:
+        return None
+    start_text, end_text = spec.split("-", 1)
+    try:
+        if start_text == "":
+            suffix = int(end_text)
+            if suffix <= 0:
+                return None
+            length = min(size, suffix)
+            return (size - length, size - 1)
+        start = int(start_text)
+        end = size - 1 if end_text == "" else int(end_text)
+    except ValueError:
+        return None
+    if start < 0 or end < start or start >= size:
+        return None
+    return (start, min(end, size - 1))
 
 
 def _preset_records() -> list[dict[str, str]]:
